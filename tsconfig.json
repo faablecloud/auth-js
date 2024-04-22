@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es2016",
+    "module": "ESNext",
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "rootDir": "src",
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "moduleResolution": "node",
+    "jsx": "react",
+    "declaration": true,
+    "declarationMap": true
+  }
+}

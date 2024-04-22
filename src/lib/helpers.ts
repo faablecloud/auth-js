@@ -1,0 +1,214 @@
+import { AuthResponse, SupportedStorage, User, UserResponse } from "./types";
+import { setItemAsync } from "./storage_helpers";
+
+function dec2hex(dec: number) {
+  return ("0" + dec.toString(16)).substr(-2);
+}
+
+export function decodeBase64URL(value: string): string {
+  const key =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+  let base64 = "";
+  let chr1, chr2, chr3;
+  let enc1, enc2, enc3, enc4;
+  let i = 0;
+  value = value.replace("-", "+").replace("_", "/");
+
+  while (i < value.length) {
+    enc1 = key.indexOf(value.charAt(i++));
+    enc2 = key.indexOf(value.charAt(i++));
+    enc3 = key.indexOf(value.charAt(i++));
+    enc4 = key.indexOf(value.charAt(i++));
+    chr1 = (enc1 << 2) | (enc2 >> 4);
+    chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
+    chr3 = ((enc3 & 3) << 6) | enc4;
+    base64 = base64 + String.fromCharCode(chr1);
+
+    if (enc3 != 64 && chr2 != 0) {
+      base64 = base64 + String.fromCharCode(chr2);
+    }
+    if (enc4 != 64 && chr3 != 0) {
+      base64 = base64 + String.fromCharCode(chr3);
+    }
+  }
+  return base64;
+}
+
+// Functions below taken from: https://stackoverflow.com/questions/63309409/creating-a-code-verifier-and-challenge-for-pkce-auth-on-spotify-api-in-reactjs
+export function generatePKCEVerifier() {
+  const verifierLength = 56;
+  const array = new Uint32Array(verifierLength);
+  if (typeof crypto === "undefined") {
+    const charSet =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    const charSetLen = charSet.length;
+    let verifier = "";
+    for (let i = 0; i < verifierLength; i++) {
+      verifier += charSet.charAt(Math.floor(Math.random() * charSetLen));
+    }
+    return verifier;
+  }
+  crypto.getRandomValues(array);
+  return Array.from(array, dec2hex).join("");
+}
+
+async function sha256(randomString: string) {
+  const encoder = new TextEncoder();
+  const encodedData = encoder.encode(randomString);
+  const hash = await crypto.subtle.digest("SHA-256", encodedData);
+  const bytes = new Uint8Array(hash);
+
+  return Array.from(bytes)
+    .map((c) => String.fromCharCode(c))
+    .join("");
+}
+
+function base64urlencode(str: string) {
+  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export async function generatePKCEChallenge(verifier: string) {
+  const hasCryptoSupport =
+    typeof crypto !== "undefined" &&
+    typeof crypto.subtle !== "undefined" &&
+    typeof TextEncoder !== "undefined";
+
+  if (!hasCryptoSupport) {
+    console.warn(
+      "WebCrypto API is not supported. Code challenge method will default to use plain instead of sha256."
+    );
+    return verifier;
+  }
+  const hashed = await sha256(verifier);
+  return base64urlencode(hashed);
+}
+
+export async function getCodeChallengeAndMethod(
+  storage: SupportedStorage,
+  storageKey: string,
+  isPasswordRecovery = false
+) {
+  const codeVerifier = generatePKCEVerifier();
+  let storedCodeVerifier = codeVerifier;
+  if (isPasswordRecovery) {
+    storedCodeVerifier += "/PASSWORD_RECOVERY";
+  }
+  await setItemAsync(
+    storage,
+    `${storageKey}-code-verifier`,
+    storedCodeVerifier
+  );
+  const codeChallenge = await generatePKCEChallenge(codeVerifier);
+  const codeChallengeMethod = codeVerifier === codeChallenge ? "plain" : "s256";
+  return [codeChallenge, codeChallengeMethod];
+}
+
+export const isBrowser = () => typeof document !== "undefined";
+
+const localStorageWriteTests = {
+  tested: false,
+  writable: false,
+};
+
+/**
+ * Checks whether localStorage is supported on this browser.
+ */
+export const supportsLocalStorage = () => {
+  if (!isBrowser()) {
+    return false;
+  }
+
+  try {
+    if (typeof globalThis.localStorage !== "object") {
+      return false;
+    }
+  } catch (e) {
+    // DOM exception when accessing `localStorage`
+    return false;
+  }
+
+  if (localStorageWriteTests.tested) {
+    return localStorageWriteTests.writable;
+  }
+
+  const randomKey = `lswt-${Math.random()}${Math.random()}`;
+
+  try {
+    globalThis.localStorage.setItem(randomKey, randomKey);
+    globalThis.localStorage.removeItem(randomKey);
+
+    localStorageWriteTests.tested = true;
+    localStorageWriteTests.writable = true;
+  } catch (e) {
+    // localStorage can't be written to
+    // https://www.chromium.org/for-testers/bug-reporting-guidelines/uncaught-securityerror-failed-to-read-the-localstorage-property-from-window-access-is-denied-for-this-document
+
+    localStorageWriteTests.tested = true;
+    localStorageWriteTests.writable = false;
+  }
+
+  return localStorageWriteTests.writable;
+};
+
+export function uuid() {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+    const r = (Math.random() * 16) | 0,
+      v = c == "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/**
+ * Extracts parameters encoded in the URL both in the query and fragment.
+ */
+export function parseParametersFromURL(href: string) {
+  const result: { [parameter: string]: string } = {};
+
+  const url = new URL(href);
+
+  if (url.hash && url.hash[0] === "#") {
+    try {
+      const hashSearchParams = new URLSearchParams(url.hash.substring(1));
+      hashSearchParams.forEach((value, key) => {
+        result[key] = value;
+      });
+    } catch (e: any) {
+      // hash is not a query string
+    }
+  }
+
+  // search parameters take precedence over hash parameters
+  url.searchParams.forEach((value, key) => {
+    result[key] = value;
+  });
+
+  return result;
+}
+
+/**
+ * hasSession checks if the response object contains a valid session
+ * @param data A response object
+ * @returns true if a session is in the response
+ */
+function hasSession(data: any): boolean {
+  return data.access_token && data.refresh_token && data.expires_in;
+}
+
+export function expiresAt(expiresIn: number) {
+  const timeNow = Math.round(Date.now() / 1000);
+  return timeNow + expiresIn;
+}
+
+export function _sessionResponse(data: any): AuthResponse {
+  let session = null;
+  if (hasSession(data)) {
+    session = { ...data };
+
+    if (!data.expires_at) {
+      session.expires_at = expiresAt(data.expires_in);
+    }
+  }
+
+  const user: User = data.user ?? (data as User);
+  return { data: { session, user }, error: null };
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@faablecloud/auth-js",
+  "version": "0.0.0-development",
+  "author": "Marc Pomar <marc@faable.com>",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "devDependencies": {
+    "@types/isomorphic-fetch": "^0.0.39",
+    "@types/node": "^20.12.7",
+    "rimraf": "^5.0.5",
+    "typescript": "^5.4.5",
+    "semantic-release-plugin-update-version-in-files": "^1.1.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "isomorphic-fetch": "^3.0.0"
+  }
+}
