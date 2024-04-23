@@ -441,3 +441,13 @@ export type UserResponse =
       };
       error: AuthError;
     };
+
+export type CallRefreshTokenResult =
+  | {
+      session: Session;
+      error: null;
+    }
+  | {
+      session: null;
+      error: AuthError;
+    };

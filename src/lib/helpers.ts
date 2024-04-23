@@ -212,3 +212,70 @@ export function _sessionResponse(data: any): AuthResponse {
   const user: User = data.user ?? (data as User);
   return { data: { session, user }, error: null };
 }
+
+/**
+ * A deferred represents some asynchronous work that is not yet finished, which
+ * may or may not culminate in a value.
+ * Taken from: https://github.com/mike-north/types/blob/master/src/async.ts
+ */
+export class Deferred<T = any> {
+  public static promiseConstructor: PromiseConstructor = Promise;
+
+  public readonly promise!: PromiseLike<T>;
+
+  public readonly resolve!: (value?: T | PromiseLike<T>) => void;
+
+  public readonly reject!: (reason?: any) => any;
+
+  public constructor() {
+    // eslint-disable-next-line @typescript-eslint/no-extra-semi
+    (this as any).promise = new Deferred.promiseConstructor((res, rej) => {
+      // eslint-disable-next-line @typescript-eslint/no-extra-semi
+      (this as any).resolve = res;
+      // eslint-disable-next-line @typescript-eslint/no-extra-semi
+      (this as any).reject = rej;
+    });
+  }
+}
+
+/**
+ * Converts the provided async function into a retryable function. Each result
+ * or thrown error is sent to the isRetryable function which should return true
+ * if the function should run again.
+ */
+export function retryable<T>(
+  fn: (attempt: number) => Promise<T>,
+  isRetryable: (attempt: number, error: any | null, result?: T) => boolean
+): Promise<T> {
+  const promise = new Promise<T>((accept, reject) => {
+    // eslint-disable-next-line @typescript-eslint/no-extra-semi
+    (async () => {
+      for (let attempt = 0; attempt < Infinity; attempt++) {
+        try {
+          const result = await fn(attempt);
+
+          if (!isRetryable(attempt, null, result)) {
+            accept(result);
+            return;
+          }
+        } catch (e: any) {
+          if (!isRetryable(attempt, e)) {
+            reject(e);
+            return;
+          }
+        }
+      }
+    })();
+  });
+
+  return promise;
+}
+
+/**
+ * Creates a promise that resolves to null after some time.
+ */
+export async function sleep(time: number): Promise<null> {
+  return new Promise((accept) => {
+    setTimeout(() => accept(null), time);
+  });
+}

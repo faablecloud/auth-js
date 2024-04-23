@@ -8,6 +8,7 @@ import {
   Subscription,
   InitializeResult,
   User,
+  CallRefreshTokenResult,
 } from "./lib/types";
 
 import { decodeJWTPayload, verify as verifyIdToken } from "./lib/jwt";
@@ -18,10 +19,13 @@ import {
 } from "./lib/types";
 import { TokenEndpointResponse, Session, SignOut } from "./lib/types";
 import {
+  Deferred,
   _sessionResponse,
   getCodeChallengeAndMethod,
   isBrowser,
   parseParametersFromURL,
+  retryable,
+  sleep,
   uuid,
 } from "./lib/helpers";
 import { EXPIRY_MARGIN, STORAGE_KEY } from "./lib/constants";
@@ -75,6 +79,8 @@ export class FaableAuthClient extends Base {
   protected autoRefreshToken: boolean;
   protected autoRefreshTicker: ReturnType<typeof setInterval> | null = null;
   protected visibilityChangedCallback: (() => Promise<any>) | null = null;
+
+  protected refreshingDeferred: Deferred<CallRefreshTokenResult> | null = null;
 
   /**
    * Used to broadcast state change events to other tabs listening.
@@ -385,11 +391,14 @@ export class FaableAuthClient extends Base {
     const [codeVerifier, redirectType] = ((storageItem ?? "") as string).split(
       "/"
     );
-    const res = await _post(`${this.domainUrl}/token?grant_type=pkce`, {
-      auth_code: authCode,
-      code_verifier: codeVerifier,
-    });
-    const { data, error } = _sessionResponse(res);
+    const { data, error } = await _post(
+      `${this.domainUrl}/oauth/token?grant_type=pkce`,
+      {
+        auth_code: authCode,
+        code_verifier: codeVerifier,
+      },
+      { transform: _sessionResponse }
+    );
 
     await removeItemAsync(this.storage, `${this.storageKey}-code-verifier`);
     if (error) {
@@ -1126,9 +1135,137 @@ export class FaableAuthClient extends Base {
     });
   }
 
-  private _callRefreshToken(jwt?: string) {
-    this._debug("_callRefreshToken() not implemented");
-    return { session: null, error: null };
+  private async _callRefreshToken(refreshToken: string) {
+    if (!refreshToken) {
+      throw new AuthSessionMissingError();
+    }
+
+    // refreshing is already in progress
+    if (this.refreshingDeferred) {
+      return this.refreshingDeferred.promise;
+    }
+
+    const debugName = `#_callRefreshToken(${refreshToken.substring(0, 5)}...)`;
+
+    this._debug(debugName, "begin");
+
+    try {
+      this.refreshingDeferred = new Deferred<CallRefreshTokenResult>();
+
+      const { data, error } = await this._refreshAccessToken(refreshToken);
+      if (error) throw error;
+      if (!data.session) throw new AuthSessionMissingError();
+
+      await this._saveSession(data.session);
+      await this._notifyAllSubscribers("TOKEN_REFRESHED", data.session);
+
+      const result = { session: data.session, error: null };
+
+      this.refreshingDeferred.resolve(result);
+
+      return result;
+    } catch (error) {
+      this._debug(debugName, "error", error);
+
+      if (isAuthError(error)) {
+        const result = { session: null, error };
+
+        if (!isAuthRetryableFetchError(error)) {
+          await this._removeSession();
+          await this._notifyAllSubscribers("SIGNED_OUT", null);
+        }
+
+        this.refreshingDeferred?.resolve(result);
+
+        return result;
+      }
+
+      this.refreshingDeferred?.reject(error);
+      throw error;
+    } finally {
+      this.refreshingDeferred = null;
+      this._debug(debugName, "end");
+    }
+  }
+
+  /**
+   * Generates a new JWT.
+   * @param refreshToken A valid refresh token that was returned on login.
+   */
+  private async _refreshAccessToken(
+    refreshToken: string
+  ): Promise<AuthResponse> {
+    const debugName = `#_refreshAccessToken(${refreshToken.substring(
+      0,
+      5
+    )}...)`;
+    this._debug(debugName, "begin");
+
+    try {
+      const startedAt = Date.now();
+
+      // will attempt to refresh the token with exponential backoff
+
+      return await retryable(
+        async (attempt) => {
+          if (attempt > 0) {
+            await sleep(200 * Math.pow(2, attempt - 1)); // 200, 400, 800, ...
+          }
+
+          this._debug(debugName, "refreshing attempt", attempt);
+
+          // return await _post(`${this.url}/token?grant_type=refresh_token`, {
+          //   body: { refresh_token: refreshToken },
+          //   headers: this.headers,
+          //   xform: _sessionResponse,
+          // });
+          const session_res = await _post(
+            `${this.domainUrl}/oauth/token`,
+            {
+              grant_type: "refresh_token",
+              refresh_token: refreshToken,
+            },
+            { transform: _sessionResponse }
+          );
+
+          const user_res = await this._getUser(
+            session_res.data.session?.access_token
+          );
+
+          const x = {
+            data: {
+              session: {
+                ...session_res.data.session,
+                user: user_res.data.user,
+              },
+              user: user_res.data.user,
+            },
+            error: null,
+          };
+          console.log(x);
+          return x;
+        },
+        (attempt, error) => {
+          const nextBackOffInterval = 200 * Math.pow(2, attempt);
+          return (
+            error &&
+            isAuthRetryableFetchError(error) &&
+            // retryable only if the request can be sent before the backoff overflows the tick duration
+            Date.now() + nextBackOffInterval - startedAt <
+              AUTO_REFRESH_TICK_DURATION
+          );
+        }
+      );
+    } catch (error) {
+      this._debug(debugName, "error", error);
+
+      if (isAuthError(error)) {
+        return { data: { session: null, user: null }, error };
+      }
+      throw error;
+    } finally {
+      this._debug(debugName, "end");
+    }
   }
 
   private async _notifyAllSubscribers(
@@ -1283,5 +1420,61 @@ export class FaableAuthClient extends Base {
         console.error(err);
       }
     });
+  }
+
+  /**
+   * Returns a new session, regardless of expiry status.
+   * Takes in an optional current session. If not passed in, then refreshSession() will attempt to retrieve it from getSession().
+   * If the current session's refresh token is invalid, an error will be thrown.
+   * @param currentSession The current session. If passed in, it must contain a refresh token.
+   */
+  async refreshSession(currentSession?: {
+    refresh_token: string;
+  }): Promise<AuthResponse> {
+    await this.initializePromise;
+
+    return await this.lock._acquireLock(-1, async () => {
+      return await this._refreshSession(currentSession);
+    });
+  }
+
+  protected async _refreshSession(currentSession?: {
+    refresh_token: string;
+  }): Promise<AuthResponse> {
+    try {
+      return await this._useSession(async (result) => {
+        if (!currentSession) {
+          const { data, error } = result;
+          if (error) {
+            throw error;
+          }
+
+          currentSession = data.session ?? undefined;
+        }
+
+        if (!currentSession?.refresh_token) {
+          throw new AuthSessionMissingError();
+        }
+
+        const { session, error } = await this._callRefreshToken(
+          currentSession.refresh_token
+        );
+        if (error) {
+          return { data: { user: null, session: null }, error: error };
+        }
+
+        if (!session) {
+          return { data: { user: null, session: null }, error: null };
+        }
+
+        return { data: { user: (session as any).user, session }, error: null };
+      });
+    } catch (error) {
+      if (isAuthError(error)) {
+        return { data: { user: null, session: null }, error };
+      }
+
+      throw error;
+    }
   }
 }
