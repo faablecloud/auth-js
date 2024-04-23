@@ -1,4 +1,6 @@
 import { AuthError } from "./errors";
+import { LockFunc } from "../lock/locks";
+import { BaseOptions } from "../Base";
 
 /**
  * @ignore
@@ -276,8 +278,13 @@ export type FaableAuthClientConfig = {
   /* Optional key name used for storing tokens in local storage. */
   storageKey?: string;
 
-  debug?: boolean | ((message: string, ...args: any[]) => void);
-};
+  /**
+   * Provide your own locking mechanism based on the environment. By default no locking is done at this time.
+   *
+   * @experimental
+   */
+  lock?: LockFunc;
+} & BaseOptions;
 
 type AnyFunction = (...args: any[]) => any;
 type MaybePromisify<T> = T | Promise<T>;

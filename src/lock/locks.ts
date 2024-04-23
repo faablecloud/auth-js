@@ -1,4 +1,25 @@
-import { supportsLocalStorage } from "./helpers";
+import { supportsLocalStorage } from "../lib/helpers";
+
+/**
+ * Provide your own global lock implementation instead of the default
+ * implementation. The function should acquire a lock for the duration of the
+ * `fn` async function, such that no other client instances will be able to
+ * hold it at the same time.
+ *
+ * @experimental
+ *
+ * @param name Name of the lock to be acquired.
+ * @param acquireTimeout If negative, no timeout should occur. If positive it
+ *                       should throw an Error with an `isAcquireTimeout`
+ *                       property set to true if the operation fails to be
+ *                       acquired after this much time (ms).
+ * @param fn The operation to execute when the lock is acquired.
+ */
+export type LockFunc = <R>(
+  name: string,
+  acquireTimeout: number,
+  fn: () => Promise<R>
+) => Promise<R>;
 
 /**
  * @experimental
@@ -158,4 +179,12 @@ export async function navigatorLock<R>(
       }
     }
   );
+}
+
+export async function lockNoOp<R>(
+  name: string,
+  acquireTimeout: number,
+  fn: () => Promise<R>
+): Promise<R> {
+  return await fn();
 }

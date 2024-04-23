@@ -16,9 +16,7 @@ import {
   AuthResponse,
   AuthChangeEvent,
 } from "./lib/types";
-
 import { TokenEndpointResponse, Session, SignOut } from "./lib/types";
-import { version } from "./lib/version";
 import {
   _sessionResponse,
   getCodeChallengeAndMethod,
@@ -45,8 +43,10 @@ import {
   setItemAsync,
 } from "./lib/storage_helpers";
 import FaableAuthApi from "./FaableAuthApi";
-import { LockAcquireTimeoutError } from "./lib/locks";
+import { LockAcquireTimeoutError } from "./lock/locks";
 import { _get, _post } from "./lib/fetch";
+import { Base } from "./Base";
+import { Lock } from "./lock/Lock";
 
 /** Current session will be checked for refresh at this interval. */
 const AUTO_REFRESH_TICK_DURATION = 30 * 1000;
@@ -55,10 +55,7 @@ const AUTO_REFRESH_TICK_DURATION = 30 * 1000;
  * A token refresh will be attempted this many ticks before the current session expires. */
 const AUTO_REFRESH_TICK_THRESHOLD = 3;
 
-export class FaableAuthClient {
-  private static nextInstanceID = 0;
-  private instanceID: number;
-
+export class FaableAuthClient extends Base {
   domainUrl: string;
   tokenIssuer: string;
   redirect_uri: string;
@@ -67,8 +64,6 @@ export class FaableAuthClient {
 
   protected initializePromise: Promise<InitializeResult> | null = null;
   protected detectSessionInUrl = true;
-  protected logDebugMessages: boolean;
-  protected logger: (message: string, ...args: any[]) => void = console.log;
 
   protected storageKey: string;
 
@@ -87,9 +82,10 @@ export class FaableAuthClient {
   protected broadcastChannel: BroadcastChannel | null = null;
   protected stateChangeEmitters: Map<string, Subscription> = new Map();
 
+  protected lock: Lock;
+
   constructor(config: FaableAuthClientConfig) {
-    this.instanceID = FaableAuthClient.nextInstanceID;
-    FaableAuthClient.nextInstanceID += 1;
+    super({ debug: config.debug });
 
     this.sessionCheckExpiryDays = 1;
     this.redirect_uri = config.redirect_uri || "";
@@ -97,16 +93,18 @@ export class FaableAuthClient {
 
     this.tokenIssuer = getTokenIssuer("", this.domainUrl);
     this.clientId = config.clientId;
-    this.logDebugMessages = !!config.debug;
-    if (typeof config.debug === "function") {
-      this.logger = config.debug;
-    }
 
     this.api = new FaableAuthApi();
     this.storageKey = config.storageKey || STORAGE_KEY;
     this.flowType = config.flowType || "implicit";
 
     this.storage = config.storage || localStorageAdapter;
+
+    this.lock = new Lock({
+      lock: config.lock,
+      storageKey: this.storageKey,
+      debug: config.debug,
+    });
 
     if (
       isBrowser() &&
@@ -155,9 +153,9 @@ export class FaableAuthClient {
     }
 
     this.initializePromise = (async () => {
-      // return await this._acquireLock(-1, async () => {
-      return await this._initialize();
-      // });
+      return await this.lock._acquireLock(-1, async () => {
+        return await this._initialize();
+      });
     })();
 
     return await this.initializePromise;
@@ -172,6 +170,7 @@ export class FaableAuthClient {
   private async _initialize(): Promise<InitializeResult> {
     try {
       const isPKCEFlow = isBrowser() ? await this._isPKCEFlow() : false;
+
       this._debug("#_initialize()", "begin", "is PKCE flow", isPKCEFlow);
 
       if (
@@ -466,20 +465,20 @@ export class FaableAuthClient {
         // the lock first asynchronously
         await this.initializePromise;
 
-        //await this._acquireLock(-1, async () => {
-        if (document.visibilityState !== "visible") {
-          this._debug(
-            methodName,
-            "acquired the lock to recover the session, but the browser visibilityState is no longer visible, aborting"
-          );
+        await this.lock._acquireLock(-1, async () => {
+          if (document.visibilityState !== "visible") {
+            this._debug(
+              methodName,
+              "acquired the lock to recover the session, but the browser visibilityState is no longer visible, aborting"
+            );
 
-          // visibility has changed while waiting for the lock, abort
-          return;
-        }
+            // visibility has changed while waiting for the lock, abort
+            return;
+          }
 
-        // recover the session
-        await this._recoverAndRefresh();
-        // });
+          // recover the session
+          await this._recoverAndRefresh();
+        });
       }
     } else if (document.visibilityState === "hidden") {
       if (this.autoRefreshToken) {
@@ -672,45 +671,45 @@ export class FaableAuthClient {
     this._debug("#_autoRefreshTokenTick()", "begin");
 
     try {
-      // await this._acquireLock(0, async () => {
-      try {
-        const now = Date.now();
-
+      await this.lock._acquireLock(0, async () => {
         try {
-          return await this._useSession(async (result) => {
-            const {
-              data: { session },
-            } = result;
+          const now = Date.now();
 
-            if (!session || !session.refresh_token || !session.expires_at) {
-              this._debug("#_autoRefreshTokenTick()", "no session");
-              return;
-            }
+          try {
+            return await this._useSession(async (result) => {
+              const {
+                data: { session },
+              } = result;
 
-            // session will expire in this many ticks (or has already expired if <= 0)
-            const expiresInTicks = Math.floor(
-              (session.expires_at * 1000 - now) / AUTO_REFRESH_TICK_DURATION
+              if (!session || !session.refresh_token || !session.expires_at) {
+                this._debug("#_autoRefreshTokenTick()", "no session");
+                return;
+              }
+
+              // session will expire in this many ticks (or has already expired if <= 0)
+              const expiresInTicks = Math.floor(
+                (session.expires_at * 1000 - now) / AUTO_REFRESH_TICK_DURATION
+              );
+
+              this._debug(
+                "#_autoRefreshTokenTick()",
+                `access token expires in ${expiresInTicks} ticks, a tick lasts ${AUTO_REFRESH_TICK_DURATION}ms, refresh threshold is ${AUTO_REFRESH_TICK_THRESHOLD} ticks`
+              );
+
+              if (expiresInTicks <= AUTO_REFRESH_TICK_THRESHOLD) {
+                await this._callRefreshToken(session.refresh_token);
+              }
+            });
+          } catch (e: any) {
+            console.error(
+              "Auto refresh tick failed with error. This is likely a transient error.",
+              e
             );
-
-            this._debug(
-              "#_autoRefreshTokenTick()",
-              `access token expires in ${expiresInTicks} ticks, a tick lasts ${AUTO_REFRESH_TICK_DURATION}ms, refresh threshold is ${AUTO_REFRESH_TICK_THRESHOLD} ticks`
-            );
-
-            if (expiresInTicks <= AUTO_REFRESH_TICK_THRESHOLD) {
-              await this._callRefreshToken(session.refresh_token);
-            }
-          });
-        } catch (e: any) {
-          console.error(
-            "Auto refresh tick failed with error. This is likely a transient error.",
-            e
-          );
+          }
+        } finally {
+          this._debug("#_autoRefreshTokenTick()", "end");
         }
-      } finally {
-        this._debug("#_autoRefreshTokenTick()", "end");
-      }
-      // });
+      });
     } catch (e: any) {
       if (e.isAcquireTimeout || e instanceof LockAcquireTimeoutError) {
         this._debug("auto refresh token tick lock not available");
@@ -741,19 +740,6 @@ export class FaableAuthClient {
     const params = parseParametersFromURL(window.location.href);
 
     return !!(isBrowser() && (params.access_token || params.error_description));
-  }
-
-  private _debug(...args: any[]): FaableAuthClient {
-    if (this.logDebugMessages) {
-      this.logger(
-        `GoTrueClient@${
-          this.instanceID
-        } (${version}) ${new Date().toISOString()}`,
-        ...args
-      );
-    }
-
-    return this;
   }
 
   private _scope() {
@@ -865,9 +851,9 @@ export class FaableAuthClient {
   }): Promise<AuthResponse> {
     await this.initializePromise;
 
-    // return await this._acquireLock(-1, async () => {
-    return await this._setSession(currentSession);
-    // });
+    return await this.lock._acquireLock(-1, async () => {
+      return await this._setSession(currentSession);
+    });
   }
 
   /**
@@ -961,13 +947,13 @@ export class FaableAuthClient {
   > {
     this._debug("#__loadSession()", "begin");
 
-    // if (!this.lockAcquired) {
-    //   this._debug(
-    //     "#__loadSession()",
-    //     "used outside of an acquired lock!",
-    //     new Error().stack
-    //   );
-    // }
+    if (!this.lock.lockAcquired) {
+      this._debug(
+        "#__loadSession()",
+        "used outside of an acquired lock!",
+        new Error().stack
+      );
+    }
 
     try {
       let currentSession: Session | null = null;
@@ -1196,9 +1182,9 @@ export class FaableAuthClient {
   ): Promise<{ error: AuthError | null }> {
     await this.initializePromise;
 
-    // return await this._acquireLock(-1, async () => {
-    return await this._signOut(options);
-    // });
+    return await this.lock._acquireLock(-1, async () => {
+      return await this._signOut(options);
+    });
   }
 
   protected async _signOut(
@@ -1268,9 +1254,9 @@ export class FaableAuthClient {
     (async () => {
       await this.initializePromise;
 
-      // await this._acquireLock(-1, async () => {
-      this._emitInitialSession(id);
-      // });
+      await this.lock._acquireLock(-1, async () => {
+        this._emitInitialSession(id);
+      });
     })();
 
     return { data: { subscription } };
