@@ -803,7 +803,8 @@ export class FaableAuthClient extends Base {
   async signInWithOauthConnection(
     credentials: SignInWithOAuthConnection
   ): Promise<OAuthResponse> {
-    return await this._handleConnectionSignIn(credentials.connection || "", {
+    return await this._handleConnectionSignIn({
+      connection: credentials.connection,
       redirectTo: credentials?.redirectTo,
       scopes: credentials?.scopes,
       queryParams: credentials.queryParams,
@@ -811,42 +812,32 @@ export class FaableAuthClient extends Base {
     });
   }
 
-  private async _handleConnectionSignIn(
-    connection: string,
-    options: {
-      redirectTo?: string;
-      scopes?: string;
-      queryParams?: { [key: string]: string };
-      skipBrowserRedirect?: boolean;
-    }
-  ) {
+  private async _handleConnectionSignIn(options: {
+    connection?: string;
+    redirectTo?: string;
+    scopes?: string;
+    queryParams?: { [key: string]: string };
+    skipBrowserRedirect?: boolean;
+  }) {
     const url: string = await this._getUrlForConnection(
       `${this.domainUrl}/authorize`,
       {
         response_type: isBrowser() ? "code" : "token",
-        connection,
+        connection: options.connection,
         redirectTo: options.redirectTo,
         scopes: options.scopes,
         queryParams: options.queryParams,
       }
     );
 
-    this._debug(
-      "#_handleProviderSignIn()",
-      "connection",
-      connection,
-      "options",
-      options,
-      "url",
-      url
-    );
+    this._debug("#_handleProviderSignIn()", "options", options, "url", url);
 
     // try to open on the browser
     if (isBrowser() && !options.skipBrowserRedirect) {
       window.location.assign(url);
     }
 
-    return { data: { connection, url }, error: null };
+    return { data: { url }, error: null };
   }
 
   /**

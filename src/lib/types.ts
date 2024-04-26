@@ -327,14 +327,12 @@ export type SignInWithOAuthConnection = {
 export type OAuthResponse =
   | {
       data: {
-        connection: string;
         url: string;
       };
       error: null;
     }
   | {
       data: {
-        connection: string;
         url: null;
       };
       error: AuthError;
