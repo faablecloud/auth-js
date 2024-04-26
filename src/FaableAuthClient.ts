@@ -786,18 +786,16 @@ export class FaableAuthClient extends Base {
       };
     }
 
-    // Merge authorize params
-    urlParams = {
-      ...urlParams,
-      ...authorize_params,
-    };
-
     // Set connection if specified
     if (params.connection) {
       authorize_params.connection = params.connection;
     }
 
-    return `${url}?${new URLSearchParams(urlParams)}`;
+    // Merge authorize params with urlParams
+    return `${url}?${new URLSearchParams({
+      ...urlParams,
+      ...authorize_params,
+    })}`;
   }
 
   async signInWithOauthConnection(
