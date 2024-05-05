@@ -100,7 +100,7 @@ export class FaableAuthClient extends Base {
     this.tokenIssuer = getTokenIssuer("", this.domainUrl);
     this.clientId = config.clientId;
 
-    this.api = new FaableAuthApi();
+    this.api = new FaableAuthApi(this.domainUrl, { debug: config.debug });
     this.storageKey = config.storageKey || STORAGE_KEY;
     this.flowType = config.flowType || "implicit";
 
@@ -1323,8 +1323,7 @@ export class FaableAuthClient extends Base {
       }
       const accessToken = data.session?.access_token;
       if (accessToken) {
-        //const { error } = await this.admin.signOut(accessToken, scope);
-        const { error } = await this.api.signOut();
+        const { error } = await this.api.signOut({ client_id: this.clientId });
         if (error) {
           // ignore 404s since user might not exist anymore
           // ignore 401s since an invalid or expired JWT should sign out the current session

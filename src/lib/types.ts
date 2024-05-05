@@ -1,6 +1,6 @@
 import { AuthError } from "./errors";
 import { LockFunc } from "../lock/locks";
-import { BaseOptions } from "../Base";
+import { BaseLogOptions } from "../BaseLog";
 
 /**
  * @ignore
@@ -284,7 +284,7 @@ export type FaableAuthClientConfig = {
    * @experimental
    */
   lock?: LockFunc;
-} & BaseOptions;
+} & BaseLogOptions;
 
 type AnyFunction = (...args: any[]) => any;
 type MaybePromisify<T> = T | Promise<T>;

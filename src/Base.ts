@@ -1,35 +1,16 @@
-import { version } from "./lib/version";
+import { BaseLog, BaseLogOptions } from "./BaseLog";
 
-export type BaseOptions = {
-  debug?: boolean | ((message: string, ...args: any[]) => void);
-};
-
-export abstract class Base {
+export abstract class Base extends BaseLog {
   private static nextInstanceID = 0;
   private instanceID: number;
 
-  protected logDebugMessages: boolean;
-  protected logger: (message: string, ...args: any[]) => void = console.log;
-
-  constructor(config: BaseOptions = {}) {
+  constructor(config: BaseLogOptions = {}) {
+    super(config);
     this.instanceID = Base.nextInstanceID;
     Base.nextInstanceID += 1;
-    this.logDebugMessages = !!config.debug;
-    if (typeof config.debug === "function") {
-      this.logger = config.debug;
-    }
   }
 
-  protected _debug(...args: any[]) {
-    if (this.logDebugMessages) {
-      this.logger(
-        `GoTrueClient@${
-          this.instanceID
-        } (${version}) ${new Date().toISOString()}`,
-        ...args
-      );
-    }
-
-    return this;
+  extraPrint() {
+    return this.instanceID.toString();
   }
 }

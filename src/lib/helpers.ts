@@ -99,7 +99,7 @@ export async function getCodeChallengeAndMethod(
     storedCodeVerifier
   );
   const codeChallenge = await generatePKCEChallenge(codeVerifier);
-  const codeChallengeMethod = codeVerifier === codeChallenge ? "plain" : "s256";
+  const codeChallengeMethod = codeVerifier === codeChallenge ? "plain" : "S256";
   return [codeChallenge, codeChallengeMethod];
 }
 

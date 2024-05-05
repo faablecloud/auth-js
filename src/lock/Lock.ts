@@ -1,10 +1,12 @@
-import { Base, BaseOptions } from "../Base";
+import { Base } from "../Base";
+import { BaseLogOptions } from "../BaseLog";
+
 import { LockFunc, lockNoOp } from "./locks";
 
 type LockOptions = {
   storageKey: string;
   lock?: LockFunc;
-} & BaseOptions;
+} & BaseLogOptions;
 
 export class Lock extends Base {
   protected lock: LockFunc;
