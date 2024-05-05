@@ -396,7 +396,7 @@ export class FaableAuthClient extends Base {
       {
         client_id: this.clientId,
         grant_type: "authorization_code",
-        auth_code: authCode,
+        code: authCode,
         code_verifier: codeVerifier,
       },
       { transform: _sessionResponse }
