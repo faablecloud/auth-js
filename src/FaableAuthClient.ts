@@ -392,8 +392,9 @@ export class FaableAuthClient extends Base {
       "/"
     );
     const { data, error } = await _post(
-      `${this.domainUrl}/oauth/token?grant_type=pkce`,
+      `${this.domainUrl}/oauth/token`,
       {
+        grant_type: "pkce",
         auth_code: authCode,
         code_verifier: codeVerifier,
       },
