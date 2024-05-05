@@ -394,6 +394,7 @@ export class FaableAuthClient extends Base {
     const { data, error } = await _post(
       `${this.domainUrl}/oauth/token`,
       {
+        client_id: this.clientId,
         grant_type: "authorization_code",
         auth_code: authCode,
         code_verifier: codeVerifier,
