@@ -1120,26 +1120,14 @@ export class FaableAuthClient extends Base {
     await setItemAsync(this.storage, this.storageKey, session);
   }
 
-  private async _getUser(jwt?: string) {
-    return await this._useSession(async (result) => {
-      const { data, error } = result;
-      if (error) {
-        throw error;
-      }
-
-      const hasAccessToken = jwt || data.session?.access_token;
-      if (!hasAccessToken) {
-        // if there's no access token, the user can't be fetched
-        return { data: { user: null }, error: new AuthSessionMissingError() };
-      }
-
-      this._debug("#_getUser() begin");
-      const res = await _get(`${this.domainUrl}/me`, {
-        token: jwt || data.session?.access_token,
-      });
-      this._debug("#_getUser() end");
-      return { data: { user: res.data }, error: res.error };
+  private async _getUser(access_token: string) {
+    if (!access_token) throw new Error("Cannot fetch user without token");
+    this._debug("#_getUser() begin");
+    const res = await _get(`${this.domainUrl}/me`, {
+      token: access_token,
     });
+    this._debug("#_getUser() end");
+    return { data: { user: res.data }, error: res.error };
   }
 
   private async _callRefreshToken(refreshToken: string) {
