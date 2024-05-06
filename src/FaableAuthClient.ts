@@ -423,6 +423,7 @@ export class FaableAuthClient extends Base {
         ...session,
         user: data.user,
       };
+      (data as any).session = session;
 
       await this._saveSession(session);
       await this._notifyAllSubscribers("SIGNED_IN", session);
