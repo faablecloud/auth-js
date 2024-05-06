@@ -1246,7 +1246,7 @@ export class FaableAuthClient extends Base {
             },
             error: null,
           };
-          console.log(x);
+          this._debug(x);
           return x;
         },
         (attempt, error) => {
