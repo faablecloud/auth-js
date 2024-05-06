@@ -882,13 +882,13 @@ export class FaableAuthClient extends Base {
   async getSession() {
     await this.initializePromise;
 
-    // const result = await this._acquireLock(-1, async () => {
-    return this._useSession(async (result) => {
-      return result;
+    const result = await this.lock._acquireLock(-1, async () => {
+      return this._useSession(async (result) => {
+        return result;
+      });
     });
-    // });
 
-    // return result;
+    return result;
   }
 
   /**
