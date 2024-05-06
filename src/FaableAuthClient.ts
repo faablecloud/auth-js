@@ -366,6 +366,7 @@ export class FaableAuthClient extends Base {
 
       return { data: { session, redirectType: params.type }, error: null };
     } catch (error) {
+      this._debug(error);
       if (isAuthError(error)) {
         return { data: { session: null, redirectType: null }, error };
       }
@@ -411,9 +412,20 @@ export class FaableAuthClient extends Base {
         error: new AuthInvalidTokenResponseError(),
       };
     }
-    if (data.session) {
-      await this._saveSession(data.session);
-      await this._notifyAllSubscribers("SIGNED_IN", data.session);
+    let session = data.session as Session;
+    if (session) {
+      const { data, error } = await this._getUser(session.access_token);
+      if (error) {
+        throw error;
+      }
+
+      session = {
+        ...session,
+        user: data.user,
+      };
+
+      await this._saveSession(session);
+      await this._notifyAllSubscribers("SIGNED_IN", session);
     }
     return {
       data: { ...data, redirectType: redirectType ?? null } as any,
