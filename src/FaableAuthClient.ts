@@ -798,6 +798,7 @@ export class FaableAuthClient extends Base {
         await getCodeChallengeAndMethod(this.storage, this.storageKey);
 
       urlParams = {
+        ...urlParams,
         code_challenge: codeChallenge,
         code_challenge_method: codeChallengeMethod,
       };
