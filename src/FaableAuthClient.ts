@@ -1217,6 +1217,7 @@ export class FaableAuthClient extends Base {
           const session_res = await _post(
             `${this.domainUrl}/oauth/token`,
             {
+              client_id: this.clientId,
               grant_type: "refresh_token",
               refresh_token: refreshToken,
             },
@@ -1227,17 +1228,19 @@ export class FaableAuthClient extends Base {
             session_res.data.session?.access_token
           );
 
+          const { user } = user_res.data;
+
           const x = {
             data: {
               session: {
                 ...session_res.data.session,
-                user: user_res.data.user,
+                user,
               },
-              user: user_res.data.user,
+              user,
             },
             error: null,
           };
-          this._debug(x);
+          // this._debug(x);
           return x;
         },
         (attempt, error) => {
