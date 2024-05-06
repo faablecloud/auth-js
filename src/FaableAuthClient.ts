@@ -414,16 +414,18 @@ export class FaableAuthClient extends Base {
     }
     let session = data.session as Session;
     if (session) {
-      const { data, error } = await this._getUser(session.access_token);
+      const { data: userdata, error } = await this._getUser(
+        session.access_token
+      );
       if (error) {
         throw error;
       }
 
       session = {
         ...session,
-        user: data.user,
+        user: userdata.user,
       };
-      (data as any).session = session;
+      data.session = session;
 
       await this._saveSession(session);
       await this._notifyAllSubscribers("SIGNED_IN", session);
