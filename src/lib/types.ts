@@ -14,10 +14,9 @@ export interface AuthenticationResult {
 
 export class User {
   name?: string;
-  surname?: string;
-  fullname?: string;
   profile?: string;
   picture?: string;
+  email?: string;
   website?: string;
   birthdate?: string;
   locale?: string;
