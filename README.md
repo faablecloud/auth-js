@@ -23,3 +23,36 @@
 ```bash
  npm install @faable/auth-js
 ```
+
+## Configure
+
+```js
+import { createClient } from "@faable/auth-js";
+
+export const faableauth = createClient({
+  domain: "<faableauth_domain>",
+});
+```
+
+## Use specific connection
+
+To login with a specific connection (Google, Facebook, etc.), you can set it once on your client instance.
+
+```js
+const faableauth = createClient({
+  domain: "<faableauth_domain>",
+  clientId: "<connection_client_id>", // Remove if you want to use default connection
+});
+
+// Later
+faableauth.signInWithOauthConnection();
+```
+
+Or leave it blank on creation and specify it on login calls.
+
+```js
+// Later
+faableauth.signInWithOauthConnection({
+  connection: "<connection_client_id>",
+});
+```
