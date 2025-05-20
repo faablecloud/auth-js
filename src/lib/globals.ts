@@ -7,4 +7,4 @@ export const document = global?.document as Document;
 
 export { win as window };
 
-export const fetch = window.fetch;
+export const fetch = (global as any).fetch;
