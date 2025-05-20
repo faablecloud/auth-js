@@ -855,8 +855,10 @@ export class FaableAuthClient extends Base {
       { raw: true }
     );
 
-    if (!rawAuthResponse.data) {
-      throw new Error("bad server response");
+    if (!rawAuthResponse.data || rawAuthResponse.error) {
+      throw new Error(
+        rawAuthResponse.error || "Error in username password login"
+      );
     }
     handleCallback(rawAuthResponse.data);
   }

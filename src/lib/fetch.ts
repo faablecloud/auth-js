@@ -34,6 +34,12 @@ export const _post = async <T>(
     });
 
     const body = options.raw ? await res.text() : await res.json();
+    if (res.status >= 300) {
+      return {
+        data: body,
+        error: options.raw ? JSON.parse(body)?.message : body?.message,
+      };
+    }
 
     return { data: body, error: null };
   } catch (e) {
