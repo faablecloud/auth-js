@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://faable.com">
-    <img src="https://www.faable.com/logo/Emblem.png" height="96">
+    <img src="https://www.faable.com/assets/logo/Emblem.png" height="96">
     <h3 align="center">Faable</h3>
   </a>
 </p>
@@ -29,30 +29,22 @@
 ```js
 import { createClient } from "@faable/auth-js";
 
-export const faableauth = createClient({
+export const auth = createClient({
   domain: "<faableauth_domain>",
+  clientId: "<client_id>",
 });
 ```
 
-## Use specific connection
+## Login
 
 To login with a specific connection (Google, Facebook, etc.), you can set it once on your client instance.
 
 ```js
-const faableauth = createClient({
-  domain: "<faableauth_domain>",
-  clientId: "<connection_client_id>", // Remove if you want to use default connection
-});
+// Sign in using default connection
+auth.signInWithOauthConnection();
 
-// Later
-faableauth.signInWithOauthConnection();
-```
-
-Or leave it blank on creation and specify it on login calls.
-
-```js
-// Later
-faableauth.signInWithOauthConnection({
-  connection: "<connection_client_id>",
+// Or use specific connection
+auth.signInWithOauthConnection({
+  connection: "<connection_id>",
 });
 ```

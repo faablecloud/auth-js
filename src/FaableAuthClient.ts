@@ -20,14 +20,16 @@ import {
 import { TokenEndpointResponse, Session, SignOut } from "./lib/types";
 import {
   Deferred,
+  RawAuthResponse,
   _sessionResponse,
+  checkExpiresInTime,
   getCodeChallengeAndMethod,
   isBrowser,
-  parseParametersFromURL,
   retryable,
   sleep,
   uuid,
 } from "./lib/helpers";
+
 import { EXPIRY_MARGIN, STORAGE_KEY } from "./lib/constants";
 import { localStorageAdapter } from "./lib/local-storage";
 import {
@@ -51,6 +53,8 @@ import { LockAcquireTimeoutError } from "./lock/locks";
 import { _get, _post } from "./lib/fetch";
 import { Base } from "./Base";
 import { Lock } from "./lock/Lock";
+import { document } from "./lib/globals";
+import { clearURLParameters, parseParametersFromURL } from "./lib/url_helpers";
 
 /** Current session will be checked for refresh at this interval. */
 const AUTO_REFRESH_TICK_DURATION = 30 * 1000;
@@ -91,20 +95,27 @@ export class FaableAuthClient extends Base {
   protected lock: Lock;
 
   constructor(config: FaableAuthClientConfig) {
-    super({ debug: config.debug });
+    const debug = config?.debug || false;
+    super({ debug });
 
     this.sessionCheckExpiryDays = 1;
-    this.redirect_uri = config.redirect_uri || "";
+    this.redirect_uri = config?.redirect_uri || "";
+    if (!config?.domain) {
+      throw new Error("Missing domain");
+    }
     this.domainUrl = getDomain(config.domain);
 
     this.tokenIssuer = getTokenIssuer("", this.domainUrl);
+    if (!config.clientId) {
+      throw new Error("Missing clientId");
+    }
     this.clientId = config.clientId;
 
-    this.api = new FaableAuthApi(this.domainUrl, { debug: config.debug });
-    this.storageKey = config.storageKey || STORAGE_KEY;
-    this.flowType = config.flowType || "implicit";
+    this.api = new FaableAuthApi(this.domainUrl, { debug });
+    this.storageKey = config?.storageKey || STORAGE_KEY;
+    this.flowType = config?.flowType || "implicit";
 
-    this.storage = config.storage || localStorageAdapter;
+    this.storage = config?.storage || localStorageAdapter;
 
     this.lock = new Lock({
       lock: config.lock,
@@ -271,17 +282,16 @@ export class FaableAuthClient extends Base {
       }
 
       const params = parseParametersFromURL(window.location.href);
-
       if (isPKCEFlow) {
-        if (!params.code)
+        if (!params.code) {
           throw new AuthPKCEGrantCodeExchangeError("No code detected.");
+        }
+
         const { data, error } = await this._exchangeCodeForSession(params.code);
         if (error) throw error;
 
-        const url = new URL(window.location.href);
-        url.searchParams.delete("code");
-
-        window.history.replaceState(window.history.state, "", url.toString());
+        // Remove code from URL
+        clearURLParameters(["code"]);
 
         return {
           data: { session: data.session, redirectType: null },
@@ -314,40 +324,16 @@ export class FaableAuthClient extends Base {
         throw new AuthImplicitGrantRedirectError("No session defined in URL");
       }
 
-      const timeNow = Math.round(Date.now() / 1000);
-      const expiresIn = parseInt(expires_in);
-      let expiresAt = timeNow + expiresIn;
-
-      if (expires_at) {
-        expiresAt = parseInt(expires_at);
-      }
-
-      const actuallyExpiresIn = expiresAt - timeNow;
-      if (actuallyExpiresIn * 1000 <= AUTO_REFRESH_TICK_DURATION) {
-        console.warn(
-          `@supabase/gotrue-js: Session as retrieved from URL expires in ${actuallyExpiresIn}s, should have been closer to ${expiresIn}s`
-        );
-      }
-
-      const issuedAt = expiresAt - expiresIn;
-      if (timeNow - issuedAt >= 120) {
-        console.warn(
-          "@supabase/gotrue-js: Session as retrieved from URL was issued over 120s ago, URL could be stale",
-          issuedAt,
-          expiresAt,
-          timeNow
-        );
-      } else if (timeNow - issuedAt < 0) {
-        console.warn(
-          "@supabase/gotrue-js: Session as retrieved from URL was issued in the future? Check the device clok for skew",
-          issuedAt,
-          expiresAt,
-          timeNow
-        );
-      }
+      // Check time is valid
+      const { expiresAt, expiresIn } = checkExpiresInTime({
+        expires_in,
+        expires_at,
+        refreshTick: AUTO_REFRESH_TICK_DURATION,
+      });
 
       const { data, error } = await this._getUser(access_token);
-      if (error) throw error;
+
+      if (error || !data.user) throw error;
 
       const session: Session = {
         provider_token,
@@ -361,7 +347,13 @@ export class FaableAuthClient extends Base {
       };
 
       // Remove tokens from URL
-      window.location.hash = "";
+      clearURLParameters([
+        "access_token",
+        "expires_in",
+        "refresh_token",
+        "token_type",
+        "scope",
+      ]);
       this._debug("#_getSessionFromURL()", "clearing window.location.hash");
 
       return { data: { session, redirectType: params.type }, error: null };
@@ -370,7 +362,7 @@ export class FaableAuthClient extends Base {
       if (isAuthError(error)) {
         return { data: { session: null, redirectType: null }, error };
       }
-
+      debugger;
       throw error;
     }
   }
@@ -392,16 +384,22 @@ export class FaableAuthClient extends Base {
     const [codeVerifier, redirectType] = ((storageItem ?? "") as string).split(
       "/"
     );
-    const { data, error } = await _post(
+
+    const rawResponse = await _post<Partial<RawAuthResponse>>(
       `${this.domainUrl}/oauth/token`,
       {
         client_id: this.clientId,
         grant_type: "authorization_code",
         code: authCode,
         code_verifier: codeVerifier,
-      },
-      { transform: _sessionResponse }
+      }
     );
+
+    const { data, error } = _sessionResponse(rawResponse);
+
+    if (!data) {
+      throw new Error("Missing data");
+    }
 
     await removeItemAsync(this.storage, `${this.storageKey}-code-verifier`);
     if (error) {
@@ -417,7 +415,7 @@ export class FaableAuthClient extends Base {
       const { data: userdata, error } = await this._getUser(
         session.access_token
       );
-      if (error) {
+      if (error || !userdata.user) {
         throw error;
       }
 
@@ -828,6 +826,41 @@ export class FaableAuthClient extends Base {
     });
   }
 
+  async signInWithUsernamePassword(data: {
+    username: string;
+    password: string;
+    redirect_uri?: string;
+  }) {
+    // Handle response and submit
+    const handleCallback = async (formHtml: string) => {
+      console.log("rawres");
+      console.log(rawAuthResponse);
+      const div = document.createElement("div");
+      div.innerHTML = formHtml;
+      const form = document.body.appendChild(div)
+        .children[0] as HTMLFormElement;
+
+      form.submit();
+    };
+
+    const rawAuthResponse = await _post<string>(
+      `${this.domainUrl}/usernamepassword/login`,
+      {
+        username: data.username,
+        password: data.password,
+        redirect_uri:
+          data.redirect_uri || this.redirect_uri || window.location.origin,
+        client_id: this.clientId,
+      },
+      { raw: true }
+    );
+
+    if (!rawAuthResponse.data) {
+      throw new Error("bad server response");
+    }
+    handleCallback(rawAuthResponse.data);
+  }
+
   private async _handleConnectionSignIn(options: {
     connection?: string;
     redirectTo?: string;
@@ -1085,7 +1118,7 @@ export class FaableAuthClient extends Base {
         const { data, error } = await this._getUser(
           currentSession.access_token
         );
-        if (error) {
+        if (error || !data.user) {
           throw error;
         }
         session = {
@@ -1123,7 +1156,7 @@ export class FaableAuthClient extends Base {
   private async _getUser(access_token: string) {
     if (!access_token) throw new Error("Cannot fetch user without token");
     this._debug("#_getUser() begin");
-    const res = await _get(`${this.domainUrl}/me`, {
+    const res = await _get<User>(`${this.domainUrl}/me`, {
       token: access_token,
     });
     this._debug("#_getUser() end");
@@ -1214,21 +1247,27 @@ export class FaableAuthClient extends Base {
           //   headers: this.headers,
           //   xform: _sessionResponse,
           // });
-          const session_res = await _post(
+          const rawResponse = await _post<Partial<RawAuthResponse>>(
             `${this.domainUrl}/oauth/token`,
             {
               client_id: this.clientId,
               grant_type: "refresh_token",
               refresh_token: refreshToken,
-            },
-            { transform: _sessionResponse }
+            }
           );
+          const session_res = _sessionResponse(rawResponse);
 
+          if (!session_res.data.session?.access_token) {
+            throw new Error("Bad user");
+          }
           const user_res = await this._getUser(
             session_res.data.session?.access_token
           );
 
           const { user } = user_res.data;
+          if (!user) {
+            throw new Error("No user found");
+          }
 
           const x = {
             data: {

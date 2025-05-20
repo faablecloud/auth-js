@@ -44,8 +44,9 @@ export const getTokenIssuer = (
 };
 
 export const getDomain = (domainUrl: string) => {
-  if (!/^https?:\/\//.test(domainUrl)) {
-    return `https://${domainUrl}`;
+  if (!/^(https|http)?:\/\//.test(domainUrl)) {
+    const protocol = location?.protocol || "https";
+    return `${protocol}//${domainUrl}`;
   }
 
   return domainUrl;

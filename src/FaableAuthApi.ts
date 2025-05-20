@@ -18,9 +18,9 @@ export default class FaableAuthApi extends BaseLog {
     const res = await _get(url);
     this._debug(res);
     if (res.error) {
-      return { error: null, data: null };
+      return { error: res.error, data: null };
     } else {
-      return res;
+      return { error: null, data: null };
     }
   }
 }

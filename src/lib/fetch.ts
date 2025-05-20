@@ -1,12 +1,16 @@
-import { error } from "console";
-import fetch from "isomorphic-fetch";
+import { fetch } from "./globals";
 
-type RequestInitWithToken = RequestInit & {
-  token?: string;
-  transform?: (data: any) => any;
+export type JsonResponse<T = any> = {
+  data: T | null;
+  error?: any;
 };
 
-const headers = (init?: RequestInitWithToken) => {
+type RequestInitWithToken = RequestInit & {
+  token: string;
+  raw: boolean;
+};
+
+const headers = (init: Partial<RequestInitWithToken> = {}) => {
   let headers = {};
   if (init?.token) {
     headers = { ...headers, Authorization: `Bearer ${init?.token}` };
@@ -17,40 +21,39 @@ const headers = (init?: RequestInitWithToken) => {
   };
 };
 
-export const _post = async (
+export const _post = async <T>(
   url: string,
   data: object,
-  init?: RequestInitWithToken
-) => {
+  options: Partial<RequestInitWithToken> = {}
+): Promise<JsonResponse<T>> => {
   try {
     const res = await fetch(url, {
       method: "POST",
       body: JSON.stringify(data),
-      headers: { ...headers(init), "Content-Type": "application/json" },
+      headers: { ...headers(options), "Content-Type": "application/json" },
     });
 
-    const body = await res.json();
+    const body = options.raw ? await res.text() : await res.json();
 
-    return init && init.transform
-      ? init.transform(body)
-      : { data: body, error: null };
+    return { data: body, error: null };
   } catch (e) {
     return { data: null, error: e };
   }
 };
 
-export const _get = async (url: string, init?: RequestInitWithToken) => {
+export const _get = async <T>(
+  url: string,
+  options: Partial<RequestInitWithToken> = {}
+): Promise<JsonResponse<T>> => {
   try {
     const res = await fetch(url, {
-      ...init,
+      ...options,
       method: "GET",
-      headers: headers(init),
+      headers: headers(options),
     });
     const body = await res.json();
 
-    return init && init.transform
-      ? init.transform(body)
-      : { data: body, error: null };
+    return { data: body, error: null };
   } catch (e) {
     return { data: null, error: e };
   }

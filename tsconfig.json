@@ -1,16 +1,17 @@
 {
   "compilerOptions": {
-    "target": "es2016",
-    "module": "CommonJS",
+    "target": "es5",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "checkJs": true,
+    "module": "es2015",
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
+    "allowSyntheticDefaultImports": true,
     "strict": true,
-    "rootDir": "src",
     "skipLibCheck": true,
-    "outDir": "dist",
     "moduleResolution": "node",
-    "jsx": "react",
-    "declaration": true,
-    "declarationMap": true
-  }
+    "jsx": "react"
+  },
+  "include": ["src"]
 }

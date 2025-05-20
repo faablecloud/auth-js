@@ -1,5 +1,6 @@
 import { AuthResponse, SupportedStorage, User, UserResponse } from "./types";
 import { setItemAsync } from "./storage_helpers";
+import { JsonResponse } from "./fetch";
 
 function dec2hex(dec: number) {
   return ("0" + dec.toString(16)).substr(-2);
@@ -158,40 +159,21 @@ export function uuid() {
   });
 }
 
-/**
- * Extracts parameters encoded in the URL both in the query and fragment.
- */
-export function parseParametersFromURL(href: string) {
-  const result: { [parameter: string]: string } = {};
-
-  const url = new URL(href);
-
-  if (url.hash && url.hash[0] === "#") {
-    try {
-      const hashSearchParams = new URLSearchParams(url.hash.substring(1));
-      hashSearchParams.forEach((value, key) => {
-        result[key] = value;
-      });
-    } catch (e: any) {
-      // hash is not a query string
-    }
-  }
-
-  // search parameters take precedence over hash parameters
-  url.searchParams.forEach((value, key) => {
-    result[key] = value;
-  });
-
-  return result;
-}
-
+export type RawAuthResponse = {
+  expires_at: number;
+  expires_in: number;
+  user: User;
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+};
 /**
  * hasSession checks if the response object contains a valid session
  * @param data A response object
  * @returns true if a session is in the response
  */
-function hasSession(data: any): boolean {
-  return data.access_token && data.refresh_token && data.expires_in;
+function hasSession(data: Partial<RawAuthResponse>): data is RawAuthResponse {
+  return !!data.access_token && !!data.refresh_token && !!data.expires_in;
 }
 
 export function expiresAt(expiresIn: number) {
@@ -199,12 +181,14 @@ export function expiresAt(expiresIn: number) {
   return timeNow + expiresIn;
 }
 
-export function _sessionResponse(data: any): AuthResponse {
+export function _sessionResponse({
+  data,
+}: JsonResponse<Partial<RawAuthResponse>>): AuthResponse {
   let session = null;
+  if (!data) throw new Error("Bad session response");
   if (hasSession(data)) {
     session = { ...data };
-
-    if (!data.expires_at) {
+    if (!data.expires_at && data.expires_in) {
       session.expires_at = expiresAt(data.expires_in);
     }
   }
@@ -279,3 +263,47 @@ export async function sleep(time: number): Promise<null> {
     setTimeout(() => accept(null), time);
   });
 }
+
+export const checkExpiresInTime = ({
+  expires_in,
+  expires_at,
+  refreshTick,
+}: {
+  expires_in: string;
+  expires_at?: string;
+  refreshTick: number;
+}) => {
+  const timeNow = Math.round(Date.now() / 1000);
+  const expiresIn = parseInt(expires_in);
+  let expiresAt = timeNow + expiresIn;
+
+  if (expires_at) {
+    expiresAt = parseInt(expires_at);
+  }
+
+  const actuallyExpiresIn = expiresAt - timeNow;
+  if (actuallyExpiresIn * 1000 <= refreshTick) {
+    console.warn(
+      `@supabase/gotrue-js: Session as retrieved from URL expires in ${actuallyExpiresIn}s, should have been closer to ${expiresIn}s`
+    );
+  }
+
+  const issuedAt = expiresAt - expiresIn;
+  if (timeNow - issuedAt >= 120) {
+    console.warn(
+      "@supabase/gotrue-js: Session as retrieved from URL was issued over 120s ago, URL could be stale",
+      issuedAt,
+      expiresAt,
+      timeNow
+    );
+  } else if (timeNow - issuedAt < 0) {
+    console.warn(
+      "@supabase/gotrue-js: Session as retrieved from URL was issued in the future? Check the device clok for skew",
+      issuedAt,
+      expiresAt,
+      timeNow
+    );
+  }
+
+  return { expiresIn, expiresAt };
+};

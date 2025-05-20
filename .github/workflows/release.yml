@@ -16,6 +16,8 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npm run build
+        env:
+          NODE_ENV: "production"
       - name: Release
         run: npx semantic-release
         env:

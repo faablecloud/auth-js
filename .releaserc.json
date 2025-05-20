@@ -1,22 +1,32 @@
 {
   "branches": [{ "name": "main" }],
   "plugins": [
+    "@semantic-release/commit-analyzer",
     [
-      "semantic-release-plugin-update-version-in-files",
+      "semantic-release-replace-plugin",
       {
-        "files": [
-          "src/lib/version.ts",
-          "dist/main/lib/version.js",
-          "dist/main/lib/version.d.ts",
-          "dist/module/lib/version.js",
-          "dist/module/lib/version.d.ts"
-        ],
-        "placeholder": "0.0.0"
+        "replacements": [
+          {
+            "files": ["pkg/dist/*.js"],
+            "from": "0.0.0-dev",
+            "to": "${nextRelease.version}"
+          }
+        ]
       }
     ],
-    "@semantic-release/commit-analyzer",
     "@semantic-release/release-notes-generator",
-    "@semantic-release/github",
-    "@semantic-release/npm"
+    [
+      "@semantic-release/github",
+      {
+        "pkgRoot": "pkg"
+      }
+    ],
+
+    [
+      "@semantic-release/npm",
+      {
+        "pkgRoot": "pkg"
+      }
+    ]
   ]
 }
