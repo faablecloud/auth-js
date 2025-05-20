@@ -170,6 +170,7 @@ const entrypointTargets = entrypoints.map((file) => {
             }
           : {}),
         ...(format === "cjs" ? { exports: "auto" } : {}),
+        // ...(format === "esm" ? { format: "esm", exports: "auto" } : {}),
       },
     ],
     plugins: pluginsForThisFile,
