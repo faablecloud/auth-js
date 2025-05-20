@@ -8,8 +8,8 @@
   },
   "license": "SEE LICENSE.md",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/faableauth.js",
+  "types": "dist/entrypints/faableauth.d.ts",
   "devDependencies": {
     "@babel/plugin-transform-nullish-coalescing-operator": "^7.27.1",
     "@babel/preset-env": "^7.27.2",

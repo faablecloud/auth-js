@@ -11,7 +11,10 @@
     "strict": true,
     "skipLibCheck": true,
     "moduleResolution": "node",
-    "jsx": "react"
+    "jsx": "react",
+    "sourceMap": true,
+    "inlineSources": true,
+    "declaration": true
   },
   "include": ["src"]
 }

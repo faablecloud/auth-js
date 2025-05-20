@@ -43,7 +43,7 @@ const plugins = (es5) => [
     mainFields: ["module", "main", "jsnext:main", "browser"],
     extensions: [".js", ".jsx", ".ts", ".tsx"],
   }),
-  typescript({ sourceMap: true }),
+  typescript({ sourceMap: true, outDir: "./pkg/dist" }),
   commonjs(),
   babel({
     extensions: [".js", ".jsx", ".ts", ".tsx"],
@@ -102,6 +102,7 @@ const plugins = (es5) => [
       name: pkg.name,
       main: pkg.main,
       //dependencies: pkg.dependencies,
+      types: pkg.types,
       version: pkg.version,
       type: "module",
       license: pkg.license,
