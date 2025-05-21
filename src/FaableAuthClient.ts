@@ -863,6 +863,20 @@ export class FaableAuthClient extends Base {
     handleCallback(rawAuthResponse.data);
   }
 
+  async changePassword(params: { email: string }) {
+    if (!params?.email) {
+      throw new Error("email is required");
+    }
+
+    const { data, error } = await _post(
+      `${this.domainUrl}/dbconnections/change_password`,
+      {
+        email: params.email,
+      }
+    );
+    return data;
+  }
+
   private async _handleConnectionSignIn(options: {
     connection?: string;
     redirectTo?: string;
