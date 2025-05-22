@@ -9,7 +9,7 @@
   "license": "SEE LICENSE.md",
   "type": "module",
   "main": "dist/main.js",
-  "types": "dist/dts/entrypoints/main.d.ts",
+  "types": "dist/dts/entrypoints/main.es.d.ts",
   "devDependencies": {
     "@babel/plugin-transform-nullish-coalescing-operator": "^7.27.1",
     "@babel/preset-env": "^7.27.2",
