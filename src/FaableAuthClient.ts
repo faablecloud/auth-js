@@ -76,7 +76,6 @@ export class FaableAuthClient extends Base {
   protected storageKey: string;
 
   protected clientId: string;
-  protected flowType: AuthFlowType;
   protected storage: SupportedStorage;
   protected api: FaableAuthApi;
 
@@ -113,7 +112,7 @@ export class FaableAuthClient extends Base {
 
     this.api = new FaableAuthApi(this.domainUrl, { debug });
     this.storageKey = config?.storageKey || STORAGE_KEY;
-    this.flowType = config?.flowType || "implicit";
+    // this.flowType = config?.flowType || "implicit";
 
     this.storage = config?.storage || localStorageAdapter;
 
@@ -186,15 +185,13 @@ export class FaableAuthClient extends Base {
    */
   private async _initialize(): Promise<InitializeResult> {
     try {
-      const isPKCEFlow = isBrowser() ? await this._isPKCEFlow() : false;
+      const flow = await this._detectFlowType();
 
-      this._debug("#_initialize()", "begin", "is PKCE flow", isPKCEFlow);
+      this._debug("#_initialize()", "begin", "flow_type", flow);
 
-      if (
-        isPKCEFlow ||
-        (this.detectSessionInUrl && this._isImplicitGrantFlow())
-      ) {
-        const { data, error } = await this._getSessionFromURL(isPKCEFlow);
+      // if exists any flow, process the session
+      if (flow) {
+        const { data, error } = await this._getSessionFromURL(flow);
         if (error) {
           this._debug(
             "#_initialize()",
@@ -263,7 +260,7 @@ export class FaableAuthClient extends Base {
   /**
    * Gets the session data from a URL string
    */
-  private async _getSessionFromURL(isPKCEFlow: boolean): Promise<
+  private async _getSessionFromURL(flow: AuthFlowType): Promise<
     | {
         data: { session: Session; redirectType: string | null };
         error: null;
@@ -271,18 +268,8 @@ export class FaableAuthClient extends Base {
     | { data: { session: null; redirectType: null }; error: AuthError }
   > {
     try {
-      if (!isBrowser())
-        throw new AuthImplicitGrantRedirectError("No browser detected.");
-      if (this.flowType === "implicit" && !this._isImplicitGrantFlow()) {
-        throw new AuthImplicitGrantRedirectError(
-          "Not a valid implicit grant flow url."
-        );
-      } else if (this.flowType == "pkce" && !isPKCEFlow) {
-        throw new AuthPKCEGrantCodeExchangeError("Not a valid PKCE flow url.");
-      }
-
       const params = parseParametersFromURL(window.location.href);
-      if (isPKCEFlow) {
+      if (flow == "pkce") {
         if (!params.code) {
           throw new AuthPKCEGrantCodeExchangeError("No code detected.");
         }
@@ -743,27 +730,44 @@ export class FaableAuthClient extends Base {
     }
   }
 
-  /**
-   * Checks if the current URL and backing storage contain parameters given by a PKCE flow
-   */
-  private async _isPKCEFlow(): Promise<boolean> {
+  // /**
+  //  * Checks if the current URL and backing storage contain parameters given by a PKCE flow
+  //  */
+  // private async _isPKCEFlow(): Promise<boolean> {
+  //   const params = parseParametersFromURL(window.location.href);
+
+  //   const currentStorageContent = await getItemAsync(
+  //     this.storage,
+  //     `${this.storageKey}-code-verifier`
+  //   );
+
+  //   return !!(params.code && currentStorageContent);
+  // }
+
+  // /**
+  //  * Checks if the current URL contains parameters given by an implicit oauth grant flow (https://www.rfc-editor.org/rfc/rfc6749.html#section-4.2)
+  //  */
+  // private _isImplicitGrantFlow(): boolean {
+  //   const params = parseParametersFromURL(window.location.href);
+
+  //   return !!(isBrowser() && (params.access_token || params.error_description));
+  // }
+
+  private async _detectFlowType(): Promise<AuthFlowType | null> {
     const params = parseParametersFromURL(window.location.href);
 
-    const currentStorageContent = await getItemAsync(
-      this.storage,
-      `${this.storageKey}-code-verifier`
-    );
+    const browser = isBrowser();
 
-    return !!(params.code && currentStorageContent);
-  }
+    // PKCE
+    if (browser && params.code) {
+      return "pkce";
+    }
 
-  /**
-   * Checks if the current URL contains parameters given by an implicit oauth grant flow (https://www.rfc-editor.org/rfc/rfc6749.html#section-4.2)
-   */
-  private _isImplicitGrantFlow(): boolean {
-    const params = parseParametersFromURL(window.location.href);
-
-    return !!(isBrowser() && (params.access_token || params.error_description));
+    // Implicit
+    if (browser && (params.access_token || params.error_description)) {
+      return "implicit";
+    }
+    return null;
   }
 
   private _scope() {
@@ -791,7 +795,9 @@ export class FaableAuthClient extends Base {
       scope: params.scopes || this._scope(),
     };
 
-    if (this.flowType === "pkce") {
+    const flowType = await this._detectFlowType();
+
+    if (flowType === "pkce") {
       const [codeChallenge, codeChallengeMethod] =
         await getCodeChallengeAndMethod(this.storage, this.storageKey);
 
@@ -1378,7 +1384,7 @@ export class FaableAuthClient extends Base {
   }
 
   protected async _signOut(
-    { scope }: SignOut = { scope: "global" }
+    { scope, returnTo }: SignOut & { returnTo?: string } = { scope: "global" }
   ): Promise<{ error: AuthError | null }> {
     return await this._useSession(async (result) => {
       const { data, error: sessionError } = result;
@@ -1387,7 +1393,9 @@ export class FaableAuthClient extends Base {
       }
       const accessToken = data.session?.access_token;
       if (accessToken) {
-        const { error } = await this.api.signOut({ client_id: this.clientId });
+        const { error } = await this.api.signOut({
+          client_id: this.clientId,
+        });
         if (error) {
           // ignore 404s since user might not exist anymore
           // ignore 401s since an invalid or expired JWT should sign out the current session

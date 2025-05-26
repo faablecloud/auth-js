@@ -12,6 +12,7 @@ export default class FaableAuthApi extends BaseLog {
 
   async signOut(params: {
     client_id: string;
+    returnTo?: string;
   }): Promise<{ data: null; error: AuthError | null }> {
     const url = `${this.base_url}/logout?${new URLSearchParams(params)}`;
     this._debug(`requesting ${url}`);
