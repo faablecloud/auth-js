@@ -1,6 +1,6 @@
 import { version } from "./version";
 export const GOTRUE_URL = "http://localhost:9999";
-export const STORAGE_KEY = "faable.auth.token";
+export const STORAGE_KEY = "faableauth";
 export const EXPIRY_MARGIN = 10; // in seconds
 
 export const API_VERSION_HEADER_NAME = "X-Faableauth-Api-Version";

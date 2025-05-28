@@ -21,6 +21,20 @@ const headers = (init: Partial<RequestInitWithToken> = {}) => {
   };
 };
 
+const _handleRes = async (
+  res: Response,
+  options: Partial<RequestInitWithToken> = {}
+) => {
+  const body = options.raw ? await res.text() : await res.json();
+  if (res.status >= 300) {
+    return {
+      data: body,
+      error: options.raw ? JSON.parse(body)?.message : body?.message,
+    };
+  }
+  return { data: body, error: null };
+};
+
 export const _post = async <T>(
   url: string,
   data: object,
@@ -33,15 +47,7 @@ export const _post = async <T>(
       headers: { ...headers(options), "Content-Type": "application/json" },
     });
 
-    const body = options.raw ? await res.text() : await res.json();
-    if (res.status >= 300) {
-      return {
-        data: body,
-        error: options.raw ? JSON.parse(body)?.message : body?.message,
-      };
-    }
-
-    return { data: body, error: null };
+    return _handleRes(res, options);
   } catch (e) {
     return { data: null, error: e };
   }
@@ -57,9 +63,8 @@ export const _get = async <T>(
       method: "GET",
       headers: headers(options),
     });
-    const body = await res.json();
 
-    return { data: body, error: null };
+    return _handleRes(res, options);
   } catch (e) {
     return { data: null, error: e };
   }

@@ -264,10 +264,12 @@ export type TokenEndpointResponse = {
 
 export type FaableAuthClientConfig = {
   domain: string;
+  clientId: string;
+
+  // Optional
   scope?: string;
   audience?: string;
   redirect_uri?: string;
-  clientId: string;
   authorizationParams?: AuthorizationParams;
   cookieDomain?: string;
   useRefreshTokens?: boolean;

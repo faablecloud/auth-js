@@ -111,8 +111,10 @@ export class FaableAuthClient extends Base {
     this.clientId = config.clientId;
 
     this.api = new FaableAuthApi(this.domainUrl, { debug });
-    this.storageKey = config?.storageKey || STORAGE_KEY;
-    // this.flowType = config?.flowType || "implicit";
+
+    // Storage key
+    const key_prefix = config?.storageKey || STORAGE_KEY;
+    this.storageKey = `${key_prefix}-${this.clientId}`;
 
     this.storage = config?.storage || localStorageAdapter;
 
@@ -349,7 +351,6 @@ export class FaableAuthClient extends Base {
       if (isAuthError(error)) {
         return { data: { session: null, redirectType: null }, error };
       }
-      debugger;
       throw error;
     }
   }
@@ -1286,7 +1287,10 @@ export class FaableAuthClient extends Base {
             session_res.data.session?.access_token
           );
 
-          const { user } = user_res.data;
+          const { data: user, error } = user_res;
+          if (error) {
+            throw new Error("Error requesting user");
+          }
           if (!user) {
             throw new Error("No user found");
           }
