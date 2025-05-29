@@ -53,8 +53,9 @@ import { LockAcquireTimeoutError } from "./lock/locks";
 import { _get, _post } from "./lib/fetch";
 import { Base } from "./Base";
 import { Lock } from "./lock/Lock";
-import { document } from "./lib/globals";
+import { document, window } from "./lib/globals";
 import { clearURLParameters, parseParametersFromURL } from "./lib/url_helpers";
+import { windowHelpers } from "./lib/helpers/window";
 
 /** Current session will be checked for refresh at this interval. */
 const AUTO_REFRESH_TICK_DURATION = 30 * 1000;
@@ -882,6 +883,41 @@ export class FaableAuthClient extends Base {
       }
     );
     return data;
+  }
+
+  buildAuthorizeUrl(
+    options: {
+      redirectTo?: string;
+      scope?: string;
+      response_type?: string;
+      audience?: string;
+    } = {}
+  ): string {
+    const params = {
+      client_id: this.clientId,
+      redirect_uri:
+        options.redirectTo || this.redirect_uri || window.location.origin,
+      response_type: options.response_type || isBrowser() ? "code" : "token",
+      audience: options.audience,
+      scope: options.scope,
+    };
+
+    // Create a new object with only non-empty properties
+    const y = Object.fromEntries(
+      Object.entries(params).filter(([key, value]) => !!value)
+    ) as Record<string, string>;
+
+    return `${this.domainUrl}/authorize?${new URLSearchParams(y).toString()}`;
+  }
+
+  authorize(options: {
+    redirectTo?: string;
+    scope?: string;
+    response_type: string;
+    audience?: string;
+  }) {
+    const url = this.buildAuthorizeUrl(options);
+    windowHelpers.redirect(url);
   }
 
   private async _handleConnectionSignIn(options: {
