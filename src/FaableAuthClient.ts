@@ -838,6 +838,7 @@ export class FaableAuthClient extends Base {
     username: string;
     password: string;
     redirect_uri?: string;
+    state?: string;
   }) {
     // Handle response and submit
     const handleCallback = async (formHtml: string) => {
@@ -859,6 +860,7 @@ export class FaableAuthClient extends Base {
         redirect_uri:
           data.redirect_uri || this.redirect_uri || window.location.origin,
         client_id: this.clientId,
+        state: data.state,
       },
       { raw: true }
     );
