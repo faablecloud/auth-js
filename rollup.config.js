@@ -105,7 +105,7 @@ const plugins = (es5) => [
     baseContents: (pkg) => ({
       name: pkg.name,
       main: pkg.main,
-      dependencies: pkg.dependencies,
+      dependencies: pkg.dependencies || {},
       types: pkg.types,
       version: pkg.version,
       type: "module",
