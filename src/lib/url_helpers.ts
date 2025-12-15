@@ -1,7 +1,7 @@
 /**
  * Extracts parameters encoded in the URL both in the query and fragment.
  */
-export function parseParametersFromURL(href: string) {
+export function parseParametersFromURL(href: string = "") {
   const result: { [parameter: string]: string } = {};
 
   const url = new URL(href);
