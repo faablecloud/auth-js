@@ -1,7 +1,18 @@
 {
   "branches": [
     {
-      "name": "main"
+      "name": "main",
+      "channel": "latest"
+    },
+    {
+      "name": "next",
+      "channel": "next",
+      "prerelease": true
+    },
+    {
+      "name": "beta",
+      "channel": "beta",
+      "prerelease": true
     }
   ],
   "repositoryUrl": "https://x-access-token:${GITHUB_TOKEN}@github.com/faablecloud/auth-js.git",
