@@ -112,9 +112,7 @@ const plugins = (es5) => [
       license: pkg.license,
       author: pkg.author,
       repository: pkg.repository,
-      publishConfig: {
-        access: "public",
-      },
+      publishConfig: pkg.publishConfig,
       bugs: pkg.bugs,
       homepage: pkg.homepage,
     }),
