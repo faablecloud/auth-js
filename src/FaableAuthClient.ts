@@ -271,7 +271,7 @@ export class FaableAuthClient extends Base {
     | { data: { session: null; redirectType: null }; error: AuthError }
   > {
     try {
-      const params = parseParametersFromURL(window.location.href);
+      const params = parseParametersFromURL(window?.location.href);
       if (flow == "pkce") {
         if (!params.code) {
           throw new AuthPKCEGrantCodeExchangeError("No code detected.");
@@ -321,9 +321,9 @@ export class FaableAuthClient extends Base {
         refreshTick: AUTO_REFRESH_TICK_DURATION,
       });
 
-      const { data, error } = await this._getUser(access_token);
+      const { data: user, error } = await this._getUser(access_token);
 
-      if (error || !data.user) throw error;
+      if (error || !user) throw error;
 
       const session: Session = {
         provider_token,
@@ -333,7 +333,7 @@ export class FaableAuthClient extends Base {
         expires_at: expiresAt,
         refresh_token,
         token_type,
-        user: data.user,
+        user,
       };
 
       // Remove tokens from URL
@@ -401,16 +401,14 @@ export class FaableAuthClient extends Base {
     }
     let session = data.session as Session;
     if (session) {
-      const { data: userdata, error } = await this._getUser(
-        session.access_token
-      );
-      if (error || !userdata.user) {
+      const { data: user, error } = await this._getUser(session.access_token);
+      if (error || !user) {
         throw error;
       }
 
       session = {
         ...session,
-        user: userdata.user,
+        user,
       };
       data.session = session;
 
@@ -756,7 +754,7 @@ export class FaableAuthClient extends Base {
   // }
 
   private async _detectFlowType(): Promise<AuthFlowType | null> {
-    const params = parseParametersFromURL(window.location.href);
+    const params = parseParametersFromURL(window?.location.href);
 
     const browser = isBrowser();
 
@@ -793,7 +791,7 @@ export class FaableAuthClient extends Base {
       client_id: this.clientId,
       response_type: params.response_type,
       redirect_uri:
-        params.redirectTo || this.redirect_uri || window.location.origin,
+        params.redirectTo || this.redirect_uri || window?.location.origin,
       scope: params.scopes || this._scope(),
     };
 
@@ -858,7 +856,7 @@ export class FaableAuthClient extends Base {
         username: data.username,
         password: data.password,
         redirect_uri:
-          data.redirect_uri || this.redirect_uri || window.location.origin,
+          data.redirect_uri || this.redirect_uri || window?.location.origin,
         client_id: this.clientId,
         state: data.state,
       },
@@ -898,7 +896,7 @@ export class FaableAuthClient extends Base {
     const params = {
       client_id: this.clientId,
       redirect_uri:
-        options.redirectTo || this.redirect_uri || window.location.origin,
+        options.redirectTo || this.redirect_uri || window?.location.origin,
       response_type: options.response_type || isBrowser() ? "code" : "token",
       audience: options.audience,
       scope: options.scope,
@@ -944,7 +942,7 @@ export class FaableAuthClient extends Base {
 
     // try to open on the browser
     if (isBrowser() && !options.skipBrowserRedirect) {
-      window.location.assign(url);
+      window?.location.assign(url);
     }
 
     return { data: { url }, error: null };
@@ -1176,16 +1174,16 @@ export class FaableAuthClient extends Base {
         }
         session = refreshedSession;
       } else {
-        const { data, error } = await this._getUser(
+        const { data: user, error } = await this._getUser(
           currentSession.access_token
         );
-        if (error || !data.user) {
+        if (error || !user) {
           throw error;
         }
         session = {
           access_token: currentSession.access_token,
           refresh_token: currentSession.refresh_token,
-          user: data.user,
+          user,
           token_type: "bearer",
           expires_in: expiresAt - timeNow,
           expires_at: expiresAt,
@@ -1221,7 +1219,7 @@ export class FaableAuthClient extends Base {
       token: access_token,
     });
     this._debug("#_getUser() end");
-    return { data: { user: res.data }, error: res.error };
+    return { data: res.data, error: res.error };
   }
 
   private async _callRefreshToken(refreshToken: string) {
@@ -1321,11 +1319,10 @@ export class FaableAuthClient extends Base {
           if (!session_res.data.session?.access_token) {
             throw new Error("Bad user");
           }
-          const user_res = await this._getUser(
+          const { data: user, error } = await this._getUser(
             session_res.data.session?.access_token
           );
 
-          const { data: user, error } = user_res;
           if (error) {
             throw new Error("Error requesting user");
           }
