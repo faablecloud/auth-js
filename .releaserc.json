@@ -17,13 +17,6 @@
     ],
     "@semantic-release/release-notes-generator",
     [
-      "@semantic-release/github",
-      {
-        "pkgRoot": "pkg"
-      }
-    ],
-
-    [
       "@semantic-release/npm",
       {
         "npmPublish": true,
