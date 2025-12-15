@@ -1,5 +1,6 @@
 {
   "branches": [{ "name": "main" }],
+  "repositoryUrl": "https://x-access-token:${GITHUB_TOKEN}@github.com/faablecloud/auth-js.git",
   "plugins": [
     "@semantic-release/commit-analyzer",
     [
@@ -25,7 +26,10 @@
     [
       "@semantic-release/npm",
       {
-        "pkgRoot": "pkg"
+        "npmPublish": true,
+        "pkgRoot": "pkg",
+        "otp": false,
+        "useOidc": true
       }
     ]
   ]

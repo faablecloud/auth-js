@@ -2,9 +2,12 @@
   "name": "@faable/auth-js",
   "version": "0.0.0-dev",
   "author": "Marc Pomar <marc@faable.com>",
-  "repository": "https://github.com/faablecloud/auth-js",
   "publishConfig": {
     "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/faablecloud/auth-js.git"
   },
   "license": "SEE LICENSE.md",
   "type": "module",

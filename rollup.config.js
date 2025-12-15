@@ -111,6 +111,7 @@ const plugins = (es5) => [
       type: "module",
       license: pkg.license,
       author: pkg.author,
+      repository: pkg.repository,
       publishConfig: {
         access: "public",
       },
