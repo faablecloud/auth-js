@@ -1,5 +1,9 @@
 {
-  "branches": [{ "name": "main" }],
+  "branches": [
+    {
+      "name": "main"
+    }
+  ],
   "repositoryUrl": "https://x-access-token:${GITHUB_TOKEN}@github.com/faablecloud/auth-js.git",
   "plugins": [
     "@semantic-release/commit-analyzer",
@@ -8,7 +12,9 @@
       {
         "replacements": [
           {
-            "files": ["pkg/dist/*.js"],
+            "files": [
+              "pkg/dist/*.js"
+            ],
             "from": "0.0.0-dev",
             "to": "${nextRelease.version}"
           }
