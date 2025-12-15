@@ -105,7 +105,7 @@ const plugins = (es5) => [
     baseContents: (pkg) => ({
       name: pkg.name,
       main: pkg.main,
-      //dependencies: pkg.dependencies,
+      dependencies: pkg.dependencies,
       types: pkg.types,
       version: pkg.version,
       type: "module",
@@ -115,6 +115,8 @@ const plugins = (es5) => [
       publishConfig: {
         access: "public",
       },
+      bugs: pkg.bugs,
+      homepage: pkg.homepage,
     }),
   }),
   isProduction &&
