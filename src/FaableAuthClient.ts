@@ -901,7 +901,7 @@ export class FaableAuthClient extends Base {
       response_type: options.response_type || isBrowser() ? "code" : "token",
       audience: options.audience,
       scope: options.scope,
-      connection,
+      connection: options.connection,
     };
 
     // Create a new object with only non-empty properties
