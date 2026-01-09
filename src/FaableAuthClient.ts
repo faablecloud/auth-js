@@ -887,6 +887,7 @@ export class FaableAuthClient extends Base {
 
   buildAuthorizeUrl(
     options: {
+      connection?: string;
       redirectTo?: string;
       scope?: string;
       response_type?: string;
@@ -900,6 +901,7 @@ export class FaableAuthClient extends Base {
       response_type: options.response_type || isBrowser() ? "code" : "token",
       audience: options.audience,
       scope: options.scope,
+      connection,
     };
 
     // Create a new object with only non-empty properties
