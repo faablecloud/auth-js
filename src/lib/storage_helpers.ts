@@ -25,10 +25,3 @@ export const getItemAsync = async (
     return value;
   }
 };
-
-export const removeItemAsync = async (
-  storage: SupportedStorage,
-  key: string
-): Promise<void> => {
-  await storage.removeItem(key);
-};

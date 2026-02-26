@@ -31,7 +31,10 @@ import {
 } from "./lib/helpers";
 
 import { EXPIRY_MARGIN, STORAGE_KEY } from "./lib/constants";
-import { localStorageAdapter } from "./lib/local-storage";
+import { localStorageAdapter } from "./lib/storage/local-storage";
+import { cookieStorageAdapter } from "./lib/storage/cookie-storage";
+import { getSessionFromCookies } from "./lib/nextjs";
+export { cookieStorageAdapter, getSessionFromCookies };
 import {
   AuthError,
   AuthImplicitGrantRedirectError,
@@ -117,7 +120,11 @@ export class FaableAuthClient extends Base {
     const key_prefix = config?.storageKey || STORAGE_KEY;
     this.storageKey = `${key_prefix}-${this.clientId}`;
 
-    this.storage = config?.storage || localStorageAdapter;
+    if (config?.cookieOptions) {
+      this.storage = cookieStorageAdapter(config.cookieOptions);
+    } else {
+      this.storage = config?.storage || localStorageAdapter;
+    }
 
     this.lock = new Lock({
       lock: config.lock,
@@ -265,9 +272,9 @@ export class FaableAuthClient extends Base {
    */
   private async _getSessionFromURL(flow: AuthFlowType): Promise<
     | {
-        data: { session: Session; redirectType: string | null };
-        error: null;
-      }
+      data: { session: Session; redirectType: string | null };
+      error: null;
+    }
     | { data: { session: null; redirectType: null }; error: AuthError }
   > {
     try {
@@ -292,7 +299,7 @@ export class FaableAuthClient extends Base {
       if (params.error || params.error_description || params.error_code) {
         throw new AuthImplicitGrantRedirectError(
           params.error_description ||
-            "Error in URL with unspecified error_description",
+          "Error in URL with unspecified error_description",
           {
             error: params.error || "unspecified_error",
             code: params.error_code || "unspecified_code",
@@ -358,13 +365,13 @@ export class FaableAuthClient extends Base {
 
   private async _exchangeCodeForSession(authCode: string): Promise<
     | {
-        data: { session: Session; user: User; redirectType: string | null };
-        error: null;
-      }
+      data: { session: Session; user: User; redirectType: string | null };
+      error: null;
+    }
     | {
-        data: { session: null; user: null; redirectType: null };
-        error: AuthError;
-      }
+      data: { session: null; user: null; redirectType: null };
+      error: AuthError;
+    }
   > {
     const storageItem = await getItemAsync(
       this.storage,
@@ -390,7 +397,8 @@ export class FaableAuthClient extends Base {
       throw new Error("Missing data");
     }
 
-    await removeItemAsync(this.storage, `${this.storageKey}-code-verifier`);
+    await this.storage.removeItem(`${this.storageKey}-code-verifier`)
+
     if (error) {
       return { data: { user: null, session: null, redirectType: null }, error };
     } else if (!data || !data.session || !data.user) {
@@ -525,8 +533,7 @@ export class FaableAuthClient extends Base {
 
       this._debug(
         debugName,
-        `session has${
-          expiresWithMargin ? "" : " not"
+        `session has${expiresWithMargin ? "" : " not"
         } expired with margin of ${EXPIRY_MARGIN}s`
       );
 
@@ -999,23 +1006,23 @@ export class FaableAuthClient extends Base {
     fn: (
       result:
         | {
-            data: {
-              session: Session;
-            };
-            error: null;
-          }
+          data: {
+            session: Session;
+          };
+          error: null;
+        }
         | {
-            data: {
-              session: null;
-            };
-            error: AuthError;
-          }
+          data: {
+            session: null;
+          };
+          error: AuthError;
+        }
         | {
-            data: {
-              session: null;
-            };
-            error: null;
-          }
+          data: {
+            session: null;
+          };
+          error: null;
+        }
     ) => Promise<R>
   ): Promise<R> {
     this._debug("#_useSession", "begin");
@@ -1037,23 +1044,23 @@ export class FaableAuthClient extends Base {
    */
   private async __loadSession(): Promise<
     | {
-        data: {
-          session: Session;
-        };
-        error: null;
-      }
+      data: {
+        session: Session;
+      };
+      error: null;
+    }
     | {
-        data: {
-          session: null;
-        };
-        error: AuthError;
-      }
+      data: {
+        session: null;
+      };
+      error: AuthError;
+    }
     | {
-        data: {
-          session: null;
-        };
-        error: null;
-      }
+      data: {
+        session: null;
+      };
+      error: null;
+    }
   > {
     this._debug("#__loadSession()", "begin");
 
@@ -1130,8 +1137,7 @@ export class FaableAuthClient extends Base {
 
   private async _removeSession() {
     this._debug("#_removeSession()");
-
-    await removeItemAsync(this.storage, this.storageKey);
+    await this.storage.removeItem(this.storageKey)
   }
 
   private _isValidSession(maybeSession: unknown): maybeSession is Session {
@@ -1352,7 +1358,7 @@ export class FaableAuthClient extends Base {
             isAuthRetryableFetchError(error) &&
             // retryable only if the request can be sent before the backoff overflows the tick duration
             Date.now() + nextBackOffInterval - startedAt <
-              AUTO_REFRESH_TICK_DURATION
+            AUTO_REFRESH_TICK_DURATION
           );
         }
       );
@@ -1452,7 +1458,7 @@ export class FaableAuthClient extends Base {
       }
       if (scope !== "others") {
         await this._removeSession();
-        await removeItemAsync(this.storage, `${this.storageKey}-code-verifier`);
+        await this.storage.removeItem(`${this.storageKey}-code-verifier`)
         await this._notifyAllSubscribers("SIGNED_OUT", null);
       }
       return { error: null };
