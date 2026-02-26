@@ -48,7 +48,6 @@ import {
 } from "./lib/errors";
 import {
   getItemAsync,
-  removeItemAsync,
   setItemAsync,
 } from "./lib/storage_helpers";
 import FaableAuthApi from "./FaableAuthApi";
