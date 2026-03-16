@@ -63,22 +63,22 @@ const plugins = (es5) => [
         {
           targets: es5
             ? [
-                "> 0.5%, last 2 versions, Firefox ESR, not dead",
-                "chrome > 62",
-                "firefox > 59",
-                "ios_saf >= 6.1",
-                "opera > 50",
-                "safari > 12",
-                "IE 11",
-              ]
+              "> 0.5%, last 2 versions, Firefox ESR, not dead",
+              "chrome > 62",
+              "firefox > 59",
+              "ios_saf >= 6.1",
+              "opera > 50",
+              "safari > 12",
+              "IE 11",
+            ]
             : [
-                "> 0.5%, last 2 versions, Firefox ESR, not dead",
-                "chrome > 62",
-                "firefox > 59",
-                "ios_saf >= 10.3",
-                "opera > 50",
-                "safari > 12",
-              ],
+              "> 0.5%, last 2 versions, Firefox ESR, not dead",
+              "chrome > 62",
+              "firefox > 59",
+              "ios_saf >= 10.3",
+              "opera > 50",
+              "safari > 12",
+            ],
         },
       ],
     ],
@@ -118,17 +118,17 @@ const plugins = (es5) => [
     }),
   }),
   isProduction &&
-    terser({
-      toplevel: true,
-      compress: {
-        // 5 is the default if unspecified
-        ecma: es5 ? 5 : 6,
-      },
-    }),
+  terser({
+    toplevel: true,
+    compress: {
+      // 5 is the default if unspecified
+      ecma: es5 ? 5 : 6,
+    },
+  }),
   isProduction &&
-    copy({
-      targets: [{ src: "README.md", dest: "pkg" }],
-    }),
+  copy({
+    targets: [{ src: "README.md", dest: "pkg" }],
+  }),
   filesize(),
 ];
 
@@ -163,12 +163,12 @@ const entrypointTargets = entrypoints.map((file) => {
         banner,
         ...(format === "iife"
           ? {
-              name: "faableauth",
-              format: "iife",
-              // globals: {
-              //   preact: "preact",
-              // },
-            }
+            name: "FaableAuth",
+            format: "iife",
+            // globals: {
+            //   preact: "preact",
+            // },
+          }
           : {}),
         ...(format === "cjs" ? { exports: "auto" } : {}),
         // ...(format === "esm" ? { format: "esm", exports: "auto" } : {}),

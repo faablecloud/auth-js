@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Test Auth-js Storage</title>
+</head>
+
+<body>
+    <h1>Testing Auth-js Storage</h1>
+    <script src="/pkg/dist/faableauth.js"></script>
+    <script>
+        console.log('Test HTML loaded');
+        if (typeof FaableAuth !== 'undefined') {
+            console.log('FaableAuth found');
+        } else {
+            console.error('FaableAuth NOT found');
+        }
+        const { FaableAuthClient } = FaableAuth;
+
+        window.setupLocalStorage = () => {
+            window.auth = new FaableAuthClient({
+                domain: 'test.faable.com',
+                clientId: 'test-client-id',
+            });
+        };
+
+        window.setupCookieStorage = () => {
+            window.auth = new FaableAuthClient({
+                domain: 'test.faable.com',
+                clientId: 'test-client-id',
+                cookieOptions: {
+                    path: '/',
+                    sameSite: 'Lax'
+                }
+            });
+        };
+
+        window.getSession = async () => {
+            // Need to wait for initialization
+            await window.auth.initialize();
+            return window.auth.session;
+        };
+    </script>
+</body>
+
+</html>

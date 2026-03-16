@@ -262,6 +262,29 @@ export type TokenEndpointResponse = {
   scope?: string;
 };
 
+export interface CookieOptions {
+  /**
+   * (Optional) The domain of the cookie.
+   */
+  domain?: string;
+  /**
+   * (Optional) The path of the cookie.
+   */
+  path?: string;
+  /**
+   * (Optional) The same-site attribute of the cookie.
+   */
+  sameSite?: "Lax" | "Strict" | "None";
+  /**
+   * (Optional) Whether the cookie should only be sent over HTTPS.
+   */
+  secure?: boolean;
+  /**
+   * (Optional) The maximum age of the cookie in seconds.
+   */
+  maxAge?: number;
+}
+
 export type FaableAuthClientConfig = {
   domain: string;
   clientId: string;
@@ -278,6 +301,11 @@ export type FaableAuthClientConfig = {
   storage?: SupportedStorage;
   /* Optional key name used for storing tokens in local storage. */
   storageKey?: string;
+
+  /**
+   * (Optional) Options for the cookie storage.
+   */
+  cookieOptions?: CookieOptions;
 
   /**
    * Provide your own locking mechanism based on the environment. By default no locking is done at this time.

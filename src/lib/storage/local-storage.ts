@@ -1,5 +1,5 @@
-import { supportsLocalStorage } from "./helpers";
-import { SupportedStorage } from "./types";
+import { supportsLocalStorage } from "../helpers";
+import { SupportedStorage } from "../types";
 
 /**
  * Provides safe access to the globalThis.localStorage property.
