@@ -8,7 +8,7 @@ test.describe('Auth-js Storage', () => {
     });
 
     test('should persist session in localStorage', async ({ page }) => {
-        const storageKey = 'faable-auth-token-test-client-id';
+        const storageKey = 'faableauth-test-client-id';
         const session = {
             access_token: 'test-token',
             refresh_token: 'test-refresh',
@@ -30,7 +30,7 @@ test.describe('Auth-js Storage', () => {
     });
 
     test('should persist session in cookieStorage', async ({ page }) => {
-        const storageKey = 'faable-auth-token-test-client-id';
+        const storageKey = 'faableauth-test-client-id';
         const session = {
             access_token: 'cookie-token',
             refresh_token: 'cookie-refresh',

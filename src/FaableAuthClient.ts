@@ -93,6 +93,7 @@ export class FaableAuthClient extends Base {
    */
   protected broadcastChannel: BroadcastChannel | null = null;
   protected stateChangeEmitters: Map<string, Subscription> = new Map();
+  protected _session: Session | null = null;
 
   protected lock: Lock;
 
@@ -165,6 +166,13 @@ export class FaableAuthClient extends Base {
     this.autoRefreshToken = true;
 
     this.initialize();
+  }
+
+  /**
+   * Returns the current session, if any.
+   */
+  get session() {
+    return this._session;
   }
 
   /**
@@ -559,6 +567,7 @@ export class FaableAuthClient extends Base {
         // no need to persist currentSession again, as we just loaded it from
         // local storage; persisting it again may overwrite a value saved by
         // another client with access to the same local storage
+        this._session = currentSession;
         await this._notifyAllSubscribers("SIGNED_IN", currentSession);
       }
     } catch (err) {
@@ -877,6 +886,64 @@ export class FaableAuthClient extends Base {
     handleCallback(rawAuthResponse.data);
   }
 
+  /**
+   * Completes a passwordless login using an OTP code.
+   * @param data The username and OTP code.
+   */
+  async signInWithOtp(data: {
+    username: string;
+    otp: string;
+  }): Promise<AuthResponse> {
+    const rawResponse = await _post<Partial<RawAuthResponse>>(
+      `${this.domainUrl}/oauth/token`,
+      {
+        client_id: this.clientId,
+        grant_type: "http://auth0.com/oauth/grant-type/passwordless/otp",
+        username: data.username,
+        otp: data.otp,
+      }
+    );
+
+    const { data: sessionData, error } = _sessionResponse(rawResponse);
+
+    if (error) {
+      return { data: { user: null, session: null }, error };
+    }
+
+    if (!sessionData || !sessionData.session || !sessionData.user) {
+      return {
+        data: { user: null, session: null },
+        error: new AuthInvalidTokenResponseError(),
+      };
+    }
+
+    const session = sessionData.session as Session;
+    await this._saveSession(session);
+    await this._notifyAllSubscribers("SIGNED_IN", session);
+
+    return {
+      data: { user: session.user, session },
+      error: null,
+    };
+  }
+
+  /**
+   * Starts a passwordless login flow by requesting an OTP code or a magic link.
+   * @param data The email and the type of delivery (code or link).
+   */
+  async signInWithPasswordless(data: {
+    email: string;
+    type: "code" | "link";
+  }): Promise<{ data: any; error: AuthError | null }> {
+    const response = await _post(`${this.domainUrl}/passwordless/start`, {
+      client_id: this.clientId,
+      email: data.email,
+      send: data.type,
+    });
+
+    return { data: response.data, error: response.error };
+  }
+
   async changePassword(params: { email: string }) {
     if (!params?.email) {
       throw new Error("email is required");
@@ -1136,6 +1203,7 @@ export class FaableAuthClient extends Base {
 
   private async _removeSession() {
     this._debug("#_removeSession()");
+    this._session = null;
     await this.storage.removeItem(this.storageKey)
   }
 
@@ -1215,6 +1283,7 @@ export class FaableAuthClient extends Base {
    */
   private async _saveSession(session: Session) {
     this._debug("#_saveSession()", session);
+    this._session = session;
 
     await setItemAsync(this.storage, this.storageKey, session);
   }
