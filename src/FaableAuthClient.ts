@@ -910,7 +910,7 @@ export class FaableAuthClient extends Base {
       return { data: { user: null, session: null }, error };
     }
 
-    if (!sessionData || !sessionData.session || !sessionData.user) {
+    if (!sessionData || !sessionData.session) {
       return {
         data: { user: null, session: null },
         error: new AuthInvalidTokenResponseError(),
@@ -918,6 +918,18 @@ export class FaableAuthClient extends Base {
     }
 
     const session = sessionData.session as Session;
+    const { data: user, error: userError } = await this._getUser(
+      session.access_token
+    );
+
+    if (userError || !user) {
+      return {
+        data: { user: null, session: null },
+        error: userError || new AuthUnknownError("Could not fetch user info", null),
+      };
+    }
+
+    session.user = user;
     await this._saveSession(session);
     await this._notifyAllSubscribers("SIGNED_IN", session);
 
