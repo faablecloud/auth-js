@@ -22,8 +22,61 @@ export interface CookieJar {
 const DEFAULT_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 
 /**
+ * Maximum raw bytes we put in a single cookie value before splitting. Browsers
+ * cap individual cookies at ~4096 bytes including name + attributes; after
+ * URL-encoding (typical ratio ~1.1x for JSON sessions) and the attribute tail
+ * (`Max-Age=…; Path=/; SameSite=Lax; …`) this leaves enough headroom even for
+ * the longest realistic cookie names.
+ */
+const MAX_CHUNK_SIZE = 3200
+
+const chunkKey = (key: string, idx: number): string => `${key}.${idx}`
+
+/**
+ * Returns the chunk keys for `key` in numeric order. A "chunk key" is one
+ * shaped like `<key>.<integer>`; foreign cookies that happen to share the
+ * prefix (e.g. `key-suffix`) are ignored thanks to the dot + digits check.
+ */
+const collectChunkKeys = (
+  parsed: Map<string, string>,
+  key: string
+): string[] => {
+  const prefix = `${key}.`
+  const found: { name: string; idx: number }[] = []
+  parsed.forEach((_value, name) => {
+    if (!name.startsWith(prefix)) return
+    const tail = name.slice(prefix.length)
+    if (!/^\d+$/.test(tail)) return
+    found.push({ name, idx: Number(tail) })
+  })
+  found.sort((a, b) => a.idx - b.idx)
+  return found.map(c => c.name)
+}
+
+/**
+ * Reads `key` from the parsed cookie map. Prefers a single un-chunked cookie
+ * (back-compat with sessions written by earlier SDK versions); falls back to
+ * concatenating numbered chunks. Returns null when nothing is found.
+ */
+export const readChunkedCookieValue = (
+  parsed: Map<string, string>,
+  key: string
+): string | null => {
+  const single = parsed.get(key)
+  if (single !== undefined) return single
+  const chunkNames = collectChunkKeys(parsed, key)
+  if (chunkNames.length === 0) return null
+  return chunkNames.map(name => parsed.get(name) as string).join('')
+}
+
+/**
  * A storage adapter that uses `document.cookie` to persist sessions. Useful
  * in SSR setups where the server reads the cookie on every request.
+ *
+ * Values exceeding `MAX_CHUNK_SIZE` are transparently split across numbered
+ * cookies (`<key>.0`, `<key>.1`, …) so a full session — which easily exceeds
+ * the 4 KB per-cookie browser limit once tokens, id_token and user metadata
+ * are encoded — round-trips without being silently dropped by the browser.
  *
  * The optional `jar` parameter lets tests inject a fake document; production
  * code passes nothing and the adapter uses the real `document` in browsers
@@ -45,17 +98,52 @@ export const cookieStorageAdapter = (
     getItem: (key: string) => {
       if (!jar) return null
       const parsed = parseCookies(jar.cookie)
-      return parsed.has(key) ? (parsed.get(key) as string) : null
+      return readChunkedCookieValue(parsed, key)
     },
 
     setItem: (key: string, value: string) => {
       if (!jar) return
-      jar.cookie = serializeCookie(key, value, attrs)
+      const parsed = parseCookies(jar.cookie)
+
+      if (value.length <= MAX_CHUNK_SIZE) {
+        // Single cookie path. Wipe any stale chunks left from a prior large
+        // value so a subsequent `getItem` doesn't reassemble garbage.
+        for (const name of collectChunkKeys(parsed, key)) {
+          jar.cookie = serializeCookieRemoval(name, attrs)
+        }
+        jar.cookie = serializeCookie(key, value, attrs)
+        return
+      }
+
+      // Chunked path. Drop a stale single (if any) and any chunks that fall
+      // beyond the new count; the surviving chunk indices get overwritten by
+      // the loop below.
+      if (parsed.has(key)) {
+        jar.cookie = serializeCookieRemoval(key, attrs)
+      }
+      const newCount = Math.ceil(value.length / MAX_CHUNK_SIZE)
+      for (const name of collectChunkKeys(parsed, key)) {
+        const idx = Number(name.slice(key.length + 1))
+        if (idx >= newCount) {
+          jar.cookie = serializeCookieRemoval(name, attrs)
+        }
+      }
+      for (let pos = 0, i = 0; pos < value.length; pos += MAX_CHUNK_SIZE, i++) {
+        const slice = value.slice(pos, pos + MAX_CHUNK_SIZE)
+        jar.cookie = serializeCookie(chunkKey(key, i), slice, attrs)
+      }
     },
 
     removeItem: (key: string) => {
       if (!jar) return
+      // Always emit the single removal so the call mirrors a `Set-Cookie:
+      // key=; Max-Age=0` (browsers no-op on absent cookies) and additionally
+      // clear every chunk we can see.
+      const parsed = parseCookies(jar.cookie)
       jar.cookie = serializeCookieRemoval(key, attrs)
+      for (const name of collectChunkKeys(parsed, key)) {
+        jar.cookie = serializeCookieRemoval(name, attrs)
+      }
     }
   }
 }

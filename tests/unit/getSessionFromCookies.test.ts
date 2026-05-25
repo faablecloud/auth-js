@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { getSessionFromCookies } from '../../src/lib/nextjs'
 import { STORAGE_KEY } from '../../src/lib/constants'
+import { getSessionFromCookies } from '../../src/lib/nextjs'
 
 const validSession = {
   access_token: 'at_test',
@@ -48,10 +48,7 @@ describe('getSessionFromCookies', () => {
 
   it('returns null when the cookie is absent', () => {
     expect(
-      getSessionFromCookies(
-        { get: () => undefined },
-        { clientId: CLIENT_ID }
-      )
+      getSessionFromCookies({ get: () => undefined }, { clientId: CLIENT_ID })
     ).toBeNull()
     expect(getSessionFromCookies({}, { clientId: CLIENT_ID })).toBeNull()
   })
@@ -61,5 +58,51 @@ describe('getSessionFromCookies', () => {
     expect(
       getSessionFromCookies(cookiesStore, { clientId: CLIENT_ID })
     ).toBeNull()
+  })
+
+  describe('chunked cookies', () => {
+    const split = (str: string, size: number): string[] => {
+      const out: string[] = []
+      for (let i = 0; i < str.length; i += size) out.push(str.slice(i, i + size))
+      return out
+    }
+
+    it('reassembles `key.0`, `key.1`, … from a Next.js cookies() store', () => {
+      const chunks = split(encoded, 50)
+      const store = {
+        get(name: string) {
+          const match = name.match(new RegExp(`^${DEFAULT_KEY}\\.(\\d+)$`))
+          if (!match) return undefined
+          const idx = Number(match[1])
+          return idx < chunks.length
+            ? { name, value: chunks[idx] }
+            : undefined
+        }
+      }
+      expect(getSessionFromCookies(store, { clientId: CLIENT_ID })).toEqual(
+        validSession
+      )
+    })
+
+    it('reassembles chunks from a plain object map', () => {
+      const chunks = split(encoded, 50)
+      const store: Record<string, string> = {}
+      chunks.forEach((c, i) => {
+        store[`${DEFAULT_KEY}.${i}`] = c
+      })
+      expect(getSessionFromCookies(store, { clientId: CLIENT_ID })).toEqual(
+        validSession
+      )
+    })
+
+    it('prefers a single un-chunked cookie when both shapes are present', () => {
+      const store = {
+        [DEFAULT_KEY]: encoded,
+        [`${DEFAULT_KEY}.0`]: 'stale-garbage'
+      }
+      expect(getSessionFromCookies(store, { clientId: CLIENT_ID })).toEqual(
+        validSession
+      )
+    })
   })
 })

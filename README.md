@@ -245,9 +245,9 @@ export default async function Page() {
 }
 ```
 
-Pass the same `clientId` you used in `createClient`. If you also passed a
-custom `storageKey` to `createClient`, mirror it here as `{ clientId,
-storageKey }` so the helper looks at the same cookie.
+Pass the same `clientId` you used in `createClient`. If you also passed a custom
+`storageKey` to `createClient`, mirror it here as `{ clientId, storageKey }` so
+the helper looks at the same cookie.
 
 ## License
 

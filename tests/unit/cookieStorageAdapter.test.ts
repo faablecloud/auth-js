@@ -139,4 +139,64 @@ describe('cookieStorageAdapter', () => {
     expect(adapter.getItem('a')).toBeNull()
     adapter.removeItem('a')
   })
+
+  describe('chunking for oversized values', () => {
+    // Real-world threshold: 3200 raw bytes per chunk. Anything above must split.
+    const CHUNK = 3200
+
+    it('round-trips a value larger than one chunk via numbered cookies', () => {
+      const adapter = cookieStorageAdapter({}, jar)
+      const big = 'A'.repeat(CHUNK * 2 + 137) // 3 chunks (2 full + remainder)
+      adapter.setItem('session', big)
+
+      // Single key must not exist; chunked keys must.
+      expect(jar.cookie).not.toMatch(/(?:^|; )session=/)
+      expect(jar.cookie).toMatch(/session\.0=/)
+      expect(jar.cookie).toMatch(/session\.1=/)
+      expect(jar.cookie).toMatch(/session\.2=/)
+      expect(adapter.getItem('session')).toBe(big)
+    })
+
+    it('keeps short values as a single cookie (no chunking overhead)', () => {
+      const adapter = cookieStorageAdapter({}, jar)
+      adapter.setItem('session', 'small')
+      expect(jar.cookie).toMatch(/(?:^|; )session=/)
+      expect(jar.cookie).not.toMatch(/session\.0=/)
+    })
+
+    it('removeItem clears every chunk', () => {
+      const adapter = cookieStorageAdapter({}, jar)
+      adapter.setItem('session', 'B'.repeat(CHUNK * 2))
+      expect(adapter.getItem('session')).not.toBeNull()
+      adapter.removeItem('session')
+      expect(adapter.getItem('session')).toBeNull()
+      expect(jar.cookie).not.toMatch(/session\./)
+    })
+
+    it('rewriting smaller wipes stale chunks (no leftover .N cookies)', () => {
+      const adapter = cookieStorageAdapter({}, jar)
+      adapter.setItem('session', 'C'.repeat(CHUNK * 3))
+      adapter.setItem('session', 'now small')
+      expect(adapter.getItem('session')).toBe('now small')
+      expect(jar.cookie).not.toMatch(/session\.\d+=/)
+    })
+
+    it('rewriting larger wipes a stale single cookie (no leftover key)', () => {
+      const adapter = cookieStorageAdapter({}, jar)
+      adapter.setItem('session', 'tiny')
+      const big = 'D'.repeat(CHUNK + 1)
+      adapter.setItem('session', big)
+      expect(adapter.getItem('session')).toBe(big)
+      expect(jar.cookie).not.toMatch(/(?:^|; )session=/)
+    })
+
+    it('chunk-prefix collisions on unrelated cookies are ignored', () => {
+      const adapter = cookieStorageAdapter({}, jar)
+      // `session.notes` shares the prefix but is not a chunk (not /^\d+$/)
+      adapter.setItem('session.notes', 'untouched')
+      adapter.setItem('session', 'E'.repeat(CHUNK + 50))
+      adapter.removeItem('session')
+      expect(adapter.getItem('session.notes')).toBe('untouched')
+    })
+  })
 })
