@@ -18,6 +18,10 @@
   </a>
 </p>
 
+<p align="center">
+  📚 Full documentation at <a href="https://faable.com/docs">faable.com/docs</a>
+</p>
+
 ## Features
 
 - OAuth social connections (Google, GitHub, …) with PKCE and implicit flows
@@ -248,6 +252,11 @@ export default async function Page() {
 Pass the same `clientId` you used in `createClient`. If you also passed a custom
 `storageKey` to `createClient`, mirror it here as `{ clientId, storageKey }` so
 the helper looks at the same cookie.
+
+## Documentation
+
+For the full guides, API reference, and dashboard setup walkthroughs visit
+[faable.com/docs](https://faable.com/docs).
 
 ## License
 
