@@ -14,11 +14,20 @@
   "type": "module",
   "main": "dist/main.js",
   "types": "dist/dts/entrypoints/main.es.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/dts/entrypoints/main.es.d.ts",
+      "default": "./dist/main.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
   "homepage": "https://github.com/faablecloud/auth-js#readme",
   "devDependencies": {
     "@babel/plugin-transform-nullish-coalescing-operator": "^7.27.1",
     "@babel/preset-env": "^7.27.2",
     "@babel/preset-typescript": "^7.27.1",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.58.2",
     "@rollup/plugin-alias": "^5.1.1",
     "@rollup/plugin-babel": "^6.0.4",
@@ -28,10 +37,18 @@
     "@rollup/plugin-replace": "^6.0.2",
     "@rollup/plugin-terser": "^0.4.4",
     "@rollup/plugin-typescript": "^12.1.2",
+    "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^20.19.34",
+    "@typescript-eslint/eslint-plugin": "^8.59.4",
+    "@typescript-eslint/parser": "^8.59.4",
+    "eslint": "^10.4.0",
+    "eslint-config-prettier": "^10.1.8",
+    "express": "^5.2.1",
     "fs-extra": "^11.3.0",
+    "globals": "^17.6.0",
     "http-server": "^14.1.1",
+    "prettier": "^3.8.3",
     "rimraf": "^5.0.5",
     "rollup": "^4.40.2",
     "rollup-plugin-copy": "^3.5.0",
@@ -40,7 +57,8 @@
     "semantic-release": "^25.0.2",
     "semantic-release-replace-plugin": "^1.2.7",
     "tslib": "^2.8.1",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "vitest": "^4.1.6"
   },
   "scripts": {
     "prebuild": "npm run clean",
@@ -48,7 +66,15 @@
     "dev": "rimraf pkg && rollup -c --bundleConfigAsCjs -w",
     "clean": "rimraf pkg",
     "start": "npx http-server ./ -p 8082 --cors",
-    "test": "playwright test"
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "vitest run",
+    "test:unit:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:pack": "node tests/pack/verify-pack.mjs",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\" \"tests/**/*.{ts,mjs}\" \"*.md\" \"*.{js,cjs,mjs}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"tests/**/*.{ts,mjs}\" \"*.md\" \"*.{js,cjs,mjs}\"",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
   },
   "engines": {
     "node": ">=22.8"

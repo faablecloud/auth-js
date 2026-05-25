@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>faable auth-js e2e fixture</title>
+    <script src="/pkg/dist/faableauth.js"></script>
+  </head>
+  <body>
+    <main id="root">e2e fixture</main>
+    <script>
+      // Helpers exposed to Playwright via window for orchestrating each test.
+      // The library is global: window.FaableAuth = { createClient, ... }.
+      window.__faable = {
+        createClient(config = {}) {
+          window.__client = FaableAuth.createClient({
+            domain: window.location.origin,
+            clientId: 'test-client',
+            redirectUri: window.location.origin + '/',
+            debug: false,
+            ...config
+          })
+          return true
+        },
+        async getSession() {
+          const { data } = await window.__client.getSession()
+          return data?.session ?? null
+        },
+        async signInWithOtp(payload) {
+          return window.__client.signInWithOtp(payload)
+        },
+        async signInWithPasswordless(payload) {
+          return window.__client.signInWithPasswordless(payload)
+        },
+        async signOut() {
+          return window.__client.signOut({ scope: 'local' })
+        },
+        async refreshSession() {
+          return window.__client.refreshSession()
+        },
+        events: [],
+        subscribeEvents() {
+          const { data } = window.__client.onAuthStateChange((event, session) => {
+            window.__faable.events.push({ event, hasSession: !!session })
+          })
+          window.__subscription = data.subscription
+        }
+      }
+    </script>
+  </body>
+</html>

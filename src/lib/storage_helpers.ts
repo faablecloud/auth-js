@@ -1,4 +1,4 @@
-import { SupportedStorage } from "./types";
+import { SupportedStorage } from './types'
 
 // Storage helpers
 export const setItemAsync = async (
@@ -6,22 +6,22 @@ export const setItemAsync = async (
   key: string,
   data: any
 ): Promise<void> => {
-  await storage.setItem(key, JSON.stringify(data));
-};
+  await storage.setItem(key, JSON.stringify(data))
+}
 
 export const getItemAsync = async (
   storage: SupportedStorage,
   key: string
 ): Promise<unknown> => {
-  const value = await storage.getItem(key);
+  const value = await storage.getItem(key)
 
   if (!value) {
-    return null;
+    return null
   }
 
   try {
-    return JSON.parse(value);
+    return JSON.parse(value)
   } catch {
-    return value;
+    return value
   }
-};
+}

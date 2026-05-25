@@ -1,33 +1,33 @@
-import { AuthenticationResult } from "./lib/types";
+import { AuthenticationResult } from './lib/types'
 
 export const parseAuthenticationResult = (
   queryString: string
 ): AuthenticationResult => {
-  if (queryString.indexOf("#") > -1) {
-    queryString = queryString.substring(0, queryString.indexOf("#"));
+  if (queryString.indexOf('#') > -1) {
+    queryString = queryString.substring(0, queryString.indexOf('#'))
   }
 
-  const searchParams = new URLSearchParams(queryString);
+  const searchParams = new URLSearchParams(queryString)
 
   return {
-    state: searchParams.get("state")!,
-    code: searchParams.get("code") || undefined,
-    error: searchParams.get("error") || undefined,
-    error_description: searchParams.get("error_description") || undefined,
-  };
-};
+    state: searchParams.get('state')!,
+    code: searchParams.get('code') || undefined,
+    error: searchParams.get('error') || undefined,
+    error_description: searchParams.get('error_description') || undefined
+  }
+}
 
 const stripUndefined = (params: any) => {
   return Object.keys(params)
-    .filter((k) => typeof params[k] !== "undefined")
-    .reduce((acc, key) => ({ ...acc, [key]: params[key] }), {});
-};
+    .filter(k => typeof params[k] !== 'undefined')
+    .reduce((acc, key) => ({ ...acc, [key]: params[key] }), {})
+}
 
 export const createQueryParams = ({ clientId: client_id, ...params }: any) => {
   return new URLSearchParams(
     stripUndefined({ client_id, ...params })
-  ).toString();
-};
+  ).toString()
+}
 
 /**
  * @ignore
@@ -37,59 +37,59 @@ export const getTokenIssuer = (
   domainUrl: string
 ) => {
   if (issuer) {
-    return issuer.startsWith("https://") ? issuer : `https://${issuer}`;
+    return issuer.startsWith('https://') ? issuer : `https://${issuer}`
   }
 
-  return `${domainUrl}`;
-};
+  return `${domainUrl}`
+}
 
 export const getDomain = (domainUrl: string) => {
   if (!/^(https|http)?:\/\//.test(domainUrl)) {
-    const protocol = location?.protocol || "https";
-    return `${protocol}//${domainUrl}`;
+    const protocol = location?.protocol || 'https'
+    return `${protocol}//${domainUrl}`
   }
 
-  return domainUrl;
-};
+  return domainUrl
+}
 
-export const encode = (value: string) => btoa(value);
-export const decode = (value: string) => atob(value);
+export const encode = (value: string) => btoa(value)
+export const decode = (value: string) => atob(value)
 
 // https://stackoverflow.com/questions/30106476/
 const decodeB64 = (input: string) =>
   decodeURIComponent(
     atob(input)
-      .split("")
-      .map((c) => {
-        return "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2);
+      .split('')
+      .map(c => {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
       })
-      .join("")
-  );
+      .join('')
+  )
 
 const urlEncodeB64 = (input: string) => {
-  const b64Chars: { [index: string]: string } = { "+": "-", "/": "_", "=": "" };
-  return input.replace(/[+/=]/g, (m: string) => b64Chars[m]);
-};
+  const b64Chars: { [index: string]: string } = { '+': '-', '/': '_', '=': '' }
+  return input.replace(/[+/=]/g, (m: string) => b64Chars[m])
+}
 
 export const urlDecodeB64 = (input: string) =>
-  decodeB64(input.replace(/_/g, "/").replace(/-/g, "+"));
+  decodeB64(input.replace(/_/g, '/').replace(/-/g, '+'))
 
 export const bufferToBase64UrlEncoded = (input: number[] | Uint8Array) => {
-  const ie11SafeInput = new Uint8Array(input);
+  const ie11SafeInput = new Uint8Array(input)
   return urlEncodeB64(
     window.btoa(String.fromCharCode(...Array.from(ie11SafeInput)))
-  );
-};
+  )
+}
 
 export const parseNumber = (value: any): number | undefined => {
-  if (typeof value !== "string") {
-    return value;
+  if (typeof value !== 'string') {
+    return value
   }
-  return parseInt(value, 10) || undefined;
-};
+  return parseInt(value, 10) || undefined
+}
 
 /**
  * @ignore
  */
 export const buildIsAuthenticatedCookieName = (clientId: string) =>
-  `auth0.${clientId}.is.authenticated`;
+  `auth0.${clientId}.is.authenticated`

@@ -1,24 +1,23 @@
-import { Base } from "../Base";
-import { BaseLogOptions } from "../BaseLog";
-
-import { LockFunc, lockNoOp } from "./locks";
+import { Base } from '../Base'
+import { BaseLogOptions } from '../BaseLog'
+import { LockFunc, lockNoOp } from './locks'
 
 type LockOptions = {
-  storageKey: string;
-  lock?: LockFunc;
-} & BaseLogOptions;
+  storageKey: string
+  lock?: LockFunc
+} & BaseLogOptions
 
 export class Lock extends Base {
-  protected lock: LockFunc;
-  lockAcquired = false;
-  protected pendingInLock: Promise<any>[] = [];
+  protected lock: LockFunc
+  lockAcquired = false
+  protected pendingInLock: Promise<any>[] = []
 
-  protected storageKey: string;
+  protected storageKey: string
 
   constructor(options: LockOptions) {
-    super({ debug: options.debug });
-    this.lock = options.lock || lockNoOp;
-    this.storageKey = options.storageKey;
+    super({ debug: options.debug })
+    this.lock = options.lock || lockNoOp
+    this.storageKey = options.storageKey
   }
 
   /**
@@ -28,30 +27,30 @@ export class Lock extends Base {
     acquireTimeout: number,
     fn: () => Promise<R>
   ): Promise<R> {
-    this._debug("#_acquireLock", "begin", acquireTimeout);
+    this._debug('#_acquireLock', 'begin', acquireTimeout)
 
     try {
       if (this.lockAcquired) {
         const last = this.pendingInLock.length
           ? this.pendingInLock[this.pendingInLock.length - 1]
-          : Promise.resolve();
+          : Promise.resolve()
 
         const result = (async () => {
-          await last;
-          return await fn();
-        })();
+          await last
+          return await fn()
+        })()
 
         this.pendingInLock.push(
           (async () => {
             try {
-              await result;
-            } catch (e: any) {
+              await result
+            } catch (_e) {
               // we just care if it finished
             }
           })()
-        );
+        )
 
-        return result;
+        return result
       }
 
       return await this.lock(
@@ -59,51 +58,51 @@ export class Lock extends Base {
         acquireTimeout,
         async () => {
           this._debug(
-            "#_acquireLock",
-            "lock acquired for storage key",
+            '#_acquireLock',
+            'lock acquired for storage key',
             this.storageKey
-          );
+          )
 
           try {
-            this.lockAcquired = true;
+            this.lockAcquired = true
 
-            const result = fn();
+            const result = fn()
 
             this.pendingInLock.push(
               (async () => {
                 try {
-                  await result;
-                } catch (e: any) {
+                  await result
+                } catch (_e) {
                   // we just care if it finished
                 }
               })()
-            );
+            )
 
-            await result;
+            await result
 
             // keep draining the queue until there's nothing to wait on
             while (this.pendingInLock.length) {
-              const waitOn = [...this.pendingInLock];
+              const waitOn = [...this.pendingInLock]
 
-              await Promise.all(waitOn);
+              await Promise.all(waitOn)
 
-              this.pendingInLock.splice(0, waitOn.length);
+              this.pendingInLock.splice(0, waitOn.length)
             }
 
-            return await result;
+            return await result
           } finally {
             this._debug(
-              "#_acquireLock",
-              "lock released for storage key",
+              '#_acquireLock',
+              'lock released for storage key',
               this.storageKey
-            );
+            )
 
-            this.lockAcquired = false;
+            this.lockAcquired = false
           }
         }
-      );
+      )
     } finally {
-      this._debug("#_acquireLock", "end");
+      this._debug('#_acquireLock', 'end')
     }
   }
 }
