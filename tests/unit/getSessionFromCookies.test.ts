@@ -63,7 +63,8 @@ describe('getSessionFromCookies', () => {
   describe('chunked cookies', () => {
     const split = (str: string, size: number): string[] => {
       const out: string[] = []
-      for (let i = 0; i < str.length; i += size) out.push(str.slice(i, i + size))
+      for (let i = 0; i < str.length; i += size)
+        out.push(str.slice(i, i + size))
       return out
     }
 
@@ -74,9 +75,7 @@ describe('getSessionFromCookies', () => {
           const match = name.match(new RegExp(`^${DEFAULT_KEY}\\.(\\d+)$`))
           if (!match) return undefined
           const idx = Number(match[1])
-          return idx < chunks.length
-            ? { name, value: chunks[idx] }
-            : undefined
+          return idx < chunks.length ? { name, value: chunks[idx] } : undefined
         }
       }
       expect(getSessionFromCookies(store, { clientId: CLIENT_ID })).toEqual(
