@@ -1,40 +1,8 @@
-import { getDomain, getTokenIssuer } from "./utils";
-
-import {
-  AuthFlowType,
-  SupportedStorage,
-  SignInWithOAuthConnection,
-  OAuthResponse,
-  Subscription,
-  InitializeResult,
-  User,
-  CallRefreshTokenResult,
-} from "./lib/types";
-
-import { decodeJWTPayload, verify as verifyIdToken } from "./lib/jwt";
-import {
-  FaableAuthClientConfig,
-  AuthResponse,
-  AuthChangeEvent,
-} from "./lib/types";
-import { TokenEndpointResponse, Session, SignOut } from "./lib/types";
-import {
-  Deferred,
-  RawAuthResponse,
-  _sessionResponse,
-  checkExpiresInTime,
-  getCodeChallengeAndMethod,
-  isBrowser,
-  retryable,
-  sleep,
-  uuid,
-} from "./lib/helpers";
-
-import { EXPIRY_MARGIN, STORAGE_KEY } from "./lib/constants";
-import { localStorageAdapter } from "./lib/storage/local-storage";
-import { cookieStorageAdapter } from "./lib/storage/cookie-storage";
-import { getSessionFromCookies } from "./lib/nextjs";
-export { cookieStorageAdapter, getSessionFromCookies };
+import { Base } from './Base'
+import FaableAuthApi from './FaableAuthApi'
+import { buildAndSubmitForm, resolveResponseType } from './lib/auth_helpers'
+import { BroadcastSync } from './lib/broadcast_sync'
+import { EXPIRY_MARGIN, STORAGE_KEY } from './lib/constants'
 import {
   AuthError,
   AuthImplicitGrantRedirectError,
@@ -44,135 +12,158 @@ import {
   AuthUnknownError,
   isAuthApiError,
   isAuthError,
-  isAuthRetryableFetchError,
-} from "./lib/errors";
+  isAuthRetryableFetchError
+} from './lib/errors'
+import { _get, _post } from './lib/fetch'
+import { document, window } from './lib/globals'
 import {
-  getItemAsync,
-  setItemAsync,
-} from "./lib/storage_helpers";
-import FaableAuthApi from "./FaableAuthApi";
-import { LockAcquireTimeoutError } from "./lock/locks";
-import { _get, _post } from "./lib/fetch";
-import { Base } from "./Base";
-import { Lock } from "./lock/Lock";
-import { document, window } from "./lib/globals";
-import { clearURLParameters, parseParametersFromURL } from "./lib/url_helpers";
-import { windowHelpers } from "./lib/helpers/window";
+  Deferred,
+  RawAuthResponse,
+  _sessionResponse,
+  checkExpiresInTime,
+  getCodeChallengeAndMethod,
+  isBrowser,
+  retryable,
+  sleep
+} from './lib/helpers'
+import { windowHelpers } from './lib/helpers/window'
+import { decodeJWTPayload } from './lib/jwt'
+import { getSessionFromCookies } from './lib/nextjs'
+import { loadCodeVerifier } from './lib/pkce_storage'
+import { isValidSession } from './lib/session_helpers'
+import { cookieStorageAdapter } from './lib/storage/cookie-storage'
+import { localStorageAdapter } from './lib/storage/local-storage'
+import { getItemAsync, setItemAsync } from './lib/storage_helpers'
+import {
+  AuthFlowType,
+  CallRefreshTokenResult,
+  InitializeResult,
+  OAuthResponse,
+  SignInWithOAuthConnection,
+  Subscription,
+  SupportedStorage,
+  User
+} from './lib/types'
+import {
+  AuthChangeEvent,
+  AuthResponse,
+  FaableAuthClientConfig
+} from './lib/types'
+import { Session, SignOut } from './lib/types'
+import { clearURLParameters, parseParametersFromURL } from './lib/url_helpers'
+import { withTimeout } from './lib/with_timeout'
+import { Lock } from './lock/Lock'
+import { LockAcquireTimeoutError } from './lock/locks'
+import { getDomain, getTokenIssuer } from './utils'
+
+export { cookieStorageAdapter, getSessionFromCookies }
 
 /** Current session will be checked for refresh at this interval. */
-const AUTO_REFRESH_TICK_DURATION = 30 * 1000;
+const AUTO_REFRESH_TICK_DURATION = 30 * 1000
 
 /**
  * A token refresh will be attempted this many ticks before the current session expires. */
-const AUTO_REFRESH_TICK_THRESHOLD = 3;
+const AUTO_REFRESH_TICK_THRESHOLD = 3
+
+/** Hard upper bound for a single refresh-token call before it's aborted. */
+const REFRESH_TIMEOUT_MS = 30 * 1000
+
+const resolveStorage = (config: FaableAuthClientConfig): SupportedStorage => {
+  const { storage, cookieOptions } = config
+  if (storage === 'cookie' || cookieOptions) {
+    return cookieStorageAdapter(cookieOptions)
+  }
+  if (storage === 'localStorage' || storage === undefined) {
+    return localStorageAdapter
+  }
+  return storage
+}
 
 export class FaableAuthClient extends Base {
-  domainUrl: string;
-  tokenIssuer: string;
-  redirect_uri: string;
-  scope?: string;
-  sessionCheckExpiryDays: number;
+  domainUrl: string
+  tokenIssuer: string
+  redirectUri: string
+  scope?: string
+  sessionCheckExpiryDays: number
 
-  protected initializePromise: Promise<InitializeResult> | null = null;
-  protected detectSessionInUrl = true;
+  protected initializePromise: Promise<InitializeResult> | null = null
+  protected detectSessionInUrl = true
 
-  protected storageKey: string;
+  protected storageKey: string
 
-  protected clientId: string;
-  protected storage: SupportedStorage;
-  protected api: FaableAuthApi;
+  protected clientId: string
+  protected storage: SupportedStorage
+  protected api: FaableAuthApi
 
-  protected autoRefreshToken: boolean;
-  protected autoRefreshTicker: ReturnType<typeof setInterval> | null = null;
-  protected visibilityChangedCallback: (() => Promise<any>) | null = null;
+  protected autoRefreshToken: boolean
+  protected autoRefreshTicker: ReturnType<typeof setInterval> | null = null
+  protected visibilityChangedCallback: (() => Promise<any>) | null = null
 
-  protected refreshingDeferred: Deferred<CallRefreshTokenResult> | null = null;
+  protected refreshingDeferred: Deferred<CallRefreshTokenResult> | null = null
 
   /**
-   * Used to broadcast state change events to other tabs listening.
+   * Cross-tab broadcaster + local subscriber registry for state changes.
    */
-  protected broadcastChannel: BroadcastChannel | null = null;
-  protected stateChangeEmitters: Map<string, Subscription> = new Map();
-  protected _session: Session | null = null;
+  protected broadcastSync: BroadcastSync
+  protected _session: Session | null = null
 
-  protected lock: Lock;
+  /**
+   * Initiation flow to use when redirecting to /authorize. Defaults to
+   * PKCE in browsers (recommended for SPAs) and implicit otherwise.
+   * Distinct from the callback-side flow which is detected from URL params.
+   */
+  protected flowType: AuthFlowType
+
+  protected lock: Lock
 
   constructor(config: FaableAuthClientConfig) {
-    const debug = config?.debug || false;
-    super({ debug });
+    const debug = config?.debug || false
+    super({ debug })
 
-    this.sessionCheckExpiryDays = 1;
-    this.redirect_uri = config?.redirect_uri || "";
+    this.sessionCheckExpiryDays = 1
+    this.redirectUri = config?.redirectUri || ''
     if (!config?.domain) {
-      throw new Error("Missing domain");
+      throw new Error('Missing domain')
     }
-    this.domainUrl = getDomain(config.domain);
+    this.domainUrl = getDomain(config.domain)
 
-    this.tokenIssuer = getTokenIssuer("", this.domainUrl);
+    this.tokenIssuer = getTokenIssuer('', this.domainUrl)
     if (!config.clientId) {
-      throw new Error("Missing clientId");
+      throw new Error('Missing clientId')
     }
-    this.clientId = config.clientId;
+    this.clientId = config.clientId
 
-    this.api = new FaableAuthApi(this.domainUrl, { debug });
+    this.api = new FaableAuthApi(this.domainUrl, { debug })
 
     // Storage key
-    const key_prefix = config?.storageKey || STORAGE_KEY;
-    this.storageKey = `${key_prefix}-${this.clientId}`;
+    const key_prefix = config?.storageKey || STORAGE_KEY
+    this.storageKey = `${key_prefix}-${this.clientId}`
 
-    if (config?.cookieOptions) {
-      this.storage = cookieStorageAdapter(config.cookieOptions);
-    } else {
-      this.storage = config?.storage || localStorageAdapter;
-    }
+    this.storage = resolveStorage(config)
 
     this.lock = new Lock({
       lock: config.lock,
       storageKey: this.storageKey,
-      debug: config.debug,
-    });
+      debug: config.debug
+    })
 
-    if (
-      isBrowser() &&
-      globalThis.BroadcastChannel &&
-      // this.persistSession &&
-      this.storageKey
-    ) {
-      try {
-        this.broadcastChannel = new globalThis.BroadcastChannel(
-          this.storageKey
-        );
-      } catch (e: any) {
-        console.error(
-          "Failed to create a new BroadcastChannel, multi-tab state changes will not be available",
-          e
-        );
-      }
+    this.broadcastSync = new BroadcastSync(
+      isBrowser() ? this.storageKey : '',
+      (msg, ...args) => this._debug(msg, ...args)
+    )
 
-      this.broadcastChannel?.addEventListener("message", async (event) => {
-        this._debug(
-          "received broadcast notification from other tab or client",
-          event
-        );
+    this.flowType = config.flowType ?? (isBrowser() ? 'pkce' : 'implicit')
 
-        await this._notifyAllSubscribers(
-          event.data.event,
-          event.data.session,
-          false
-        ); // broadcast = false so we don't get an endless loop of messages
-      });
-    }
+    this.autoRefreshToken = true
 
-    this.autoRefreshToken = true;
-
-    this.initialize();
+    this.initialize()
   }
 
   /**
    * Returns the current session, if any.
    */
   get session() {
-    return this._session;
+    return this._session
   }
 
   /**
@@ -182,16 +173,16 @@ export class FaableAuthClient extends Base {
    */
   async initialize(): Promise<InitializeResult> {
     if (this.initializePromise) {
-      return await this.initializePromise;
+      return await this.initializePromise
     }
 
     this.initializePromise = (async () => {
       return await this.lock._acquireLock(-1, async () => {
-        return await this._initialize();
-      });
-    })();
+        return await this._initialize()
+      })
+    })()
 
-    return await this.initializePromise;
+    return await this.initializePromise
   }
 
   /**
@@ -202,75 +193,75 @@ export class FaableAuthClient extends Base {
    */
   private async _initialize(): Promise<InitializeResult> {
     try {
-      const flow = await this._detectFlowType();
+      const flow = await this._detectFlowType()
 
-      this._debug("#_initialize()", "begin", "flow_type", flow);
+      this._debug('#_initialize()', 'begin', 'flow_type', flow)
 
       // if exists any flow, process the session
       if (flow) {
-        const { data, error } = await this._getSessionFromURL(flow);
+        const { data, error } = await this._getSessionFromURL(flow)
         if (error) {
           this._debug(
-            "#_initialize()",
-            "error detecting session from URL",
+            '#_initialize()',
+            'error detecting session from URL',
             error
-          );
+          )
 
           // hacky workaround to keep the existing session if there's an error returned from identity linking
           // TODO: once error codes are ready, we should match against it instead of the message
           if (
-            error?.message === "Identity is already linked" ||
-            error?.message === "Identity is already linked to another user"
+            error?.message === 'Identity is already linked' ||
+            error?.message === 'Identity is already linked to another user'
           ) {
-            return { error };
+            return { error }
           }
 
           // failed login attempt via url,
           // remove old session as in verifyOtp, signUp and signInWith*
-          await this._removeSession();
+          await this._removeSession()
 
-          return { error };
+          return { error }
         }
 
-        const { session, redirectType } = data;
+        const { session, redirectType } = data
 
         this._debug(
-          "#_initialize()",
-          "detected session in URL",
+          '#_initialize()',
+          'detected session in URL',
           session,
-          "redirect type",
+          'redirect type',
           redirectType
-        );
+        )
 
-        await this._saveSession(session);
+        await this._saveSession(session)
 
         setTimeout(async () => {
-          if (redirectType === "recovery") {
-            await this._notifyAllSubscribers("PASSWORD_RECOVERY", session);
+          if (redirectType === 'recovery') {
+            await this._notifyAllSubscribers('PASSWORD_RECOVERY', session)
           } else {
-            await this._notifyAllSubscribers("SIGNED_IN", session);
+            await this._notifyAllSubscribers('SIGNED_IN', session)
           }
-        }, 0);
+        }, 0)
 
-        return { error: null };
+        return { error: null }
       }
       // no login attempt via callback url try to recover session from storage
-      await this._recoverAndRefresh();
-      return { error: null };
+      await this._recoverAndRefresh()
+      return { error: null }
     } catch (error) {
       if (isAuthError(error)) {
-        return { error };
+        return { error }
       }
 
       return {
         error: new AuthUnknownError(
-          "Unexpected error during initialization",
+          'Unexpected error during initialization',
           error
-        ),
-      };
+        )
+      }
     } finally {
-      await this._handleVisibilityChange();
-      this._debug("#_initialize()", "end");
+      await this._handleVisibilityChange()
+      this._debug('#_initialize()', 'end')
     }
   }
 
@@ -279,39 +270,39 @@ export class FaableAuthClient extends Base {
    */
   private async _getSessionFromURL(flow: AuthFlowType): Promise<
     | {
-      data: { session: Session; redirectType: string | null };
-      error: null;
-    }
+        data: { session: Session; redirectType: string | null }
+        error: null
+      }
     | { data: { session: null; redirectType: null }; error: AuthError }
   > {
     try {
-      const params = parseParametersFromURL(window?.location.href);
-      if (flow == "pkce") {
+      const params = parseParametersFromURL(window?.location.href)
+      if (flow == 'pkce') {
         if (!params.code) {
-          throw new AuthPKCEGrantCodeExchangeError("No code detected.");
+          throw new AuthPKCEGrantCodeExchangeError('No code detected.')
         }
 
-        const { data, error } = await this._exchangeCodeForSession(params.code);
-        if (error) throw error;
+        const { data, error } = await this._exchangeCodeForSession(params.code)
+        if (error) throw error
 
         // Remove code from URL
-        clearURLParameters(["code"]);
+        clearURLParameters(['code'])
 
         return {
           data: { session: data.session, redirectType: null },
-          error: null,
-        };
+          error: null
+        }
       }
 
       if (params.error || params.error_description || params.error_code) {
         throw new AuthImplicitGrantRedirectError(
           params.error_description ||
-          "Error in URL with unspecified error_description",
+            'Error in URL with unspecified error_description',
           {
-            error: params.error || "unspecified_error",
-            code: params.error_code || "unspecified_code",
+            error: params.error || 'unspecified_error',
+            code: params.error_code || 'unspecified_code'
           }
-        );
+        )
       }
 
       const {
@@ -321,23 +312,23 @@ export class FaableAuthClient extends Base {
         refresh_token,
         expires_in,
         expires_at,
-        token_type,
-      } = params;
+        token_type
+      } = params
 
       if (!access_token || !expires_in || !refresh_token || !token_type) {
-        throw new AuthImplicitGrantRedirectError("No session defined in URL");
+        throw new AuthImplicitGrantRedirectError('No session defined in URL')
       }
 
       // Check time is valid
       const { expiresAt, expiresIn } = checkExpiresInTime({
         expires_in,
         expires_at,
-        refreshTick: AUTO_REFRESH_TICK_DURATION,
-      });
+        refreshTick: AUTO_REFRESH_TICK_DURATION
+      })
 
-      const { data: user, error } = await this._getUser(access_token);
+      const { data: user, error } = await this._getUser(access_token)
 
-      if (error || !user) throw error;
+      if (error || !user) throw error
 
       const session: Session = {
         provider_token,
@@ -347,93 +338,99 @@ export class FaableAuthClient extends Base {
         expires_at: expiresAt,
         refresh_token,
         token_type,
-        user,
-      };
+        user
+      }
 
       // Remove tokens from URL
       clearURLParameters([
-        "access_token",
-        "expires_in",
-        "refresh_token",
-        "token_type",
-        "scope",
-      ]);
-      this._debug("#_getSessionFromURL()", "clearing window.location.hash");
+        'access_token',
+        'expires_in',
+        'refresh_token',
+        'token_type',
+        'scope'
+      ])
+      this._debug('#_getSessionFromURL()', 'clearing window.location.hash')
 
-      return { data: { session, redirectType: params.type }, error: null };
+      return { data: { session, redirectType: params.type }, error: null }
     } catch (error) {
-      this._debug(error);
+      this._debug(error)
       if (isAuthError(error)) {
-        return { data: { session: null, redirectType: null }, error };
+        return { data: { session: null, redirectType: null }, error }
       }
-      throw error;
+      throw error
     }
   }
 
   private async _exchangeCodeForSession(authCode: string): Promise<
     | {
-      data: { session: Session; user: User; redirectType: string | null };
-      error: null;
-    }
+        data: { session: Session; user: User; redirectType: string | null }
+        error: null
+      }
     | {
-      data: { session: null; user: null; redirectType: null };
-      error: AuthError;
-    }
+        data: { session: null; user: null; redirectType: null }
+        error: AuthError
+      }
   > {
-    const storageItem = await getItemAsync(
+    const stored = await loadCodeVerifier(
       this.storage,
       `${this.storageKey}-code-verifier`
-    );
-    const [codeVerifier, redirectType] = ((storageItem ?? "") as string).split(
-      "/"
-    );
+    )
+    if (!stored) {
+      return {
+        data: { user: null, session: null, redirectType: null },
+        error: new AuthPKCEGrantCodeExchangeError(
+          'No active PKCE code verifier — the authorization flow has expired or was not started'
+        )
+      }
+    }
+    const { verifier: codeVerifier, redirectType = null } = stored
 
     const rawResponse = await _post<Partial<RawAuthResponse>>(
       `${this.domainUrl}/oauth/token`,
       {
         client_id: this.clientId,
-        grant_type: "authorization_code",
+        grant_type: 'authorization_code',
         code: authCode,
-        code_verifier: codeVerifier,
+        code_verifier: codeVerifier
       }
-    );
+    )
 
-    const { data, error } = _sessionResponse(rawResponse);
+    const { data, error } = _sessionResponse(rawResponse)
 
     if (!data) {
-      throw new Error("Missing data");
+      throw new Error('Missing data')
     }
 
     await this.storage.removeItem(`${this.storageKey}-code-verifier`)
 
     if (error) {
-      return { data: { user: null, session: null, redirectType: null }, error };
+      return { data: { user: null, session: null, redirectType: null }, error }
     } else if (!data || !data.session || !data.user) {
       return {
         data: { user: null, session: null, redirectType: null },
-        error: new AuthInvalidTokenResponseError(),
-      };
+        error: new AuthInvalidTokenResponseError()
+      }
     }
-    let session = data.session as Session;
+    let session = data.session as Session
     if (session) {
-      const { data: user, error } = await this._getUser(session.access_token);
+      const { data: user, error } = await this._getUser(session.access_token)
       if (error || !user) {
-        throw error;
+        throw error
       }
 
       session = {
         ...session,
-        user,
-      };
-      data.session = session;
+        user
+      }
+      data.session = session
 
-      await this._saveSession(session);
-      await this._notifyAllSubscribers("SIGNED_IN", session);
+      await this._saveSession(session)
+      await this._notifyAllSubscribers('SIGNED_IN', session)
     }
     return {
       data: { ...data, redirectType: redirectType ?? null } as any,
-      error,
-    };
+      error
+    }
   }
 
   /**
@@ -442,31 +439,31 @@ export class FaableAuthClient extends Base {
    * platforms it assumes always foreground.
    */
   private async _handleVisibilityChange() {
-    this._debug("#_handleVisibilityChange()");
+    this._debug('#_handleVisibilityChange()')
 
     if (!isBrowser() || !window?.addEventListener) {
       if (this.autoRefreshToken) {
         // in non-browser environments the refresh token ticker runs always
-        this.startAutoRefresh();
+        this.startAutoRefresh()
       }
 
-      return false;
+      return false
     }
 
     try {
       this.visibilityChangedCallback = async () =>
-        await this._onVisibilityChanged(false);
+        await this._onVisibilityChanged(false)
 
       window?.addEventListener(
-        "visibilitychange",
+        'visibilitychange',
         this.visibilityChangedCallback
-      );
+      )
 
       // now immediately call the visbility changed callback to setup with the
       // current visbility state
-      await this._onVisibilityChanged(true); // initial call
+      await this._onVisibilityChanged(true) // initial call
     } catch (error) {
-      console.error("_handleVisibilityChange", error);
+      console.error('_handleVisibilityChange', error)
     }
   }
 
@@ -474,14 +471,14 @@ export class FaableAuthClient extends Base {
    * Callback registered with `window.addEventListener('visibilitychange')`.
    */
   private async _onVisibilityChanged(calledFromInitialize: boolean) {
-    const methodName = `#_onVisibilityChanged(${calledFromInitialize})`;
-    this._debug(methodName, "visibilityState", document.visibilityState);
+    const methodName = `#_onVisibilityChanged(${calledFromInitialize})`
+    this._debug(methodName, 'visibilityState', document.visibilityState)
 
-    if (document.visibilityState === "visible") {
+    if (document.visibilityState === 'visible') {
       if (this.autoRefreshToken) {
         // in browser environments the refresh token ticker runs only on focused tabs
         // which prevents race conditions
-        this._startAutoRefresh();
+        this._startAutoRefresh()
       }
 
       if (!calledFromInitialize) {
@@ -489,26 +486,26 @@ export class FaableAuthClient extends Base {
         // transitioned from hidden -> visible so we need to see if the session
         // should be recovered immediately... but to do that we need to acquire
         // the lock first asynchronously
-        await this.initializePromise;
+        await this.initializePromise
 
         await this.lock._acquireLock(-1, async () => {
-          if (document.visibilityState !== "visible") {
+          if (document.visibilityState !== 'visible') {
             this._debug(
               methodName,
-              "acquired the lock to recover the session, but the browser visibilityState is no longer visible, aborting"
-            );
+              'acquired the lock to recover the session, but the browser visibilityState is no longer visible, aborting'
+            )
 
             // visibility has changed while waiting for the lock, abort
-            return;
+            return
           }
 
           // recover the session
-          await this._recoverAndRefresh();
-        });
+          await this._recoverAndRefresh()
+        })
       }
-    } else if (document.visibilityState === "hidden") {
+    } else if (document.visibilityState === 'hidden') {
       if (this.autoRefreshToken) {
-        this._stopAutoRefresh();
+        this._stopAutoRefresh()
       }
     }
   }
@@ -518,48 +515,49 @@ export class FaableAuthClient extends Base {
    * Note: this method is async to accommodate for AsyncStorage e.g. in React native.
    */
   private async _recoverAndRefresh() {
-    const debugName = "#_recoverAndRefresh()";
-    this._debug(debugName, "begin");
+    const debugName = '#_recoverAndRefresh()'
+    this._debug(debugName, 'begin')
 
     try {
-      const currentSession = await getItemAsync(this.storage, this.storageKey);
-      this._debug(debugName, "session from storage", currentSession);
+      const currentSession = await getItemAsync(this.storage, this.storageKey)
+      this._debug(debugName, 'session from storage', currentSession)
 
-      if (!this._isValidSession(currentSession)) {
-        this._debug(debugName, "session is not valid");
+      if (!isValidSession(currentSession)) {
+        this._debug(debugName, 'session is not valid')
         if (currentSession !== null) {
-          await this._removeSession();
+          await this._removeSession()
         }
 
-        return;
+        return
       }
 
-      const timeNow = Math.round(Date.now() / 1000);
+      const timeNow = Math.round(Date.now() / 1000)
       const expiresWithMargin =
-        (currentSession.expires_at ?? Infinity) < timeNow + EXPIRY_MARGIN;
+        (currentSession.expires_at ?? Infinity) < timeNow + EXPIRY_MARGIN
 
       this._debug(
         debugName,
-        `session has${expiresWithMargin ? "" : " not"
+        `session has${
+          expiresWithMargin ? '' : ' not'
         } expired with margin of ${EXPIRY_MARGIN}s`
-      );
+      )
 
       if (expiresWithMargin) {
         if (this.autoRefreshToken && currentSession.refresh_token) {
           const { error } = await this._callRefreshToken(
             currentSession.refresh_token
-          );
+          )
 
           if (error) {
-            console.error(error);
+            console.error(error)
 
             if (!isAuthRetryableFetchError(error)) {
               this._debug(
                 debugName,
-                "refresh failed with a non-retryable error, removing the session",
+                'refresh failed with a non-retryable error, removing the session',
                 error
-              );
-              await this._removeSession();
+              )
+              await this._removeSession()
             }
           }
         }
@@ -567,16 +565,16 @@ export class FaableAuthClient extends Base {
         // no need to persist currentSession again, as we just loaded it from
         // local storage; persisting it again may overwrite a value saved by
         // another client with access to the same local storage
-        this._session = currentSession;
-        await this._notifyAllSubscribers("SIGNED_IN", currentSession);
+        this._session = currentSession
+        await this._notifyAllSubscribers('SIGNED_IN', currentSession)
       }
     } catch (err) {
-      this._debug(debugName, "error", err);
+      this._debug(debugName, 'error', err)
 
-      console.error(err);
-      return;
+      console.error(err)
+      return
     } finally {
-      this._debug(debugName, "end");
+      this._debug(debugName, 'end')
     }
   }
 
@@ -587,17 +585,17 @@ export class FaableAuthClient extends Base {
    * {@see #stopAutoRefresh}
    */
   private _removeVisibilityChangedCallback() {
-    this._debug("#_removeVisibilityChangedCallback()");
+    this._debug('#_removeVisibilityChangedCallback()')
 
-    const callback = this.visibilityChangedCallback;
-    this.visibilityChangedCallback = null;
+    const callback = this.visibilityChangedCallback
+    this.visibilityChangedCallback = null
 
     try {
       if (callback && isBrowser() && window?.removeEventListener) {
-        window.removeEventListener("visibilitychange", callback);
+        window.removeEventListener('visibilitychange', callback)
       }
     } catch (e) {
-      console.error("removing visibilitychange callback failed", e);
+      console.error('removing visibilitychange callback failed', e)
     }
   }
 
@@ -607,8 +605,8 @@ export class FaableAuthClient extends Base {
    * refresh the session. If refreshing fails it will be retried for as long as
    * necessary.
    *
-   * If you set the {@link GoTrueClientOptions#autoRefreshToken} you don't need
-   * to call this function, it will be called for you.
+   * If `autoRefreshToken` is enabled in the client config you don't need to
+   * call this function, it will be called for you.
    *
    * On browsers the refresh process works only when the tab/window is in the
    * foreground to conserve resources as well as prevent race conditions and
@@ -624,8 +622,8 @@ export class FaableAuthClient extends Base {
    * {@see #stopAutoRefresh}
    */
   async startAutoRefresh() {
-    this._removeVisibilityChangedCallback();
-    await this._startAutoRefresh();
+    this._removeVisibilityChangedCallback()
+    await this._startAutoRefresh()
   }
 
   /**
@@ -633,20 +631,20 @@ export class FaableAuthClient extends Base {
    * within the library.
    */
   private async _startAutoRefresh() {
-    await this._stopAutoRefresh();
+    await this._stopAutoRefresh()
 
-    this._debug("#_startAutoRefresh()");
+    this._debug('#_startAutoRefresh()')
 
     const ticker = setInterval(
       () => this._autoRefreshTokenTick(),
       AUTO_REFRESH_TICK_DURATION
-    );
-    this.autoRefreshTicker = ticker;
+    )
+    this.autoRefreshTicker = ticker
 
     if (
       ticker &&
-      typeof ticker === "object" &&
-      typeof ticker.unref === "function"
+      typeof ticker === 'object' &&
+      typeof ticker.unref === 'function'
     ) {
       // ticker is a NodeJS Timeout object that has an `unref` method
       // https://nodejs.org/api/timers.html#timeoutunref
@@ -654,25 +652,23 @@ export class FaableAuthClient extends Base {
       // `setInterval` is preventing the process from being marked as
       // finished and tests run endlessly. This can be prevented by calling
       // `unref()` on the returned object.
-      ticker.unref();
-      // @ts-ignore
+      ticker.unref()
     } else if (
-      typeof (globalThis as any).Deno !== "undefined" &&
-      typeof (globalThis as any).Deno.unrefTimer === "function"
+      typeof (globalThis as any).Deno !== 'undefined' &&
+      typeof (globalThis as any).Deno.unrefTimer === 'function'
     ) {
-      // similar like for NodeJS, but with the Deno API
+      // Same intent as Node's unref(), via the Deno API.
       // https://deno.land/api@latest?unstable&s=Deno.unrefTimer
-      // @ts-ignore
-      Deno.unrefTimer(ticker);
+      ;(globalThis as any).Deno.unrefTimer(ticker)
     }
 
     // run the tick immediately, but in the next pass of the event loop so that
     // #_initialize can be allowed to complete without recursively waiting on
     // itself
     setTimeout(async () => {
-      await this.initializePromise;
-      await this._autoRefreshTokenTick();
-    }, 0);
+      await this.initializePromise
+      await this._autoRefreshTokenTick()
+    }, 0)
   }
 
   /**
@@ -680,13 +676,13 @@ export class FaableAuthClient extends Base {
    * within the library.
    */
   private async _stopAutoRefresh() {
-    this._debug("#_stopAutoRefresh()");
+    this._debug('#_stopAutoRefresh()')
 
-    const ticker = this.autoRefreshTicker;
-    this.autoRefreshTicker = null;
+    const ticker = this.autoRefreshTicker
+    this.autoRefreshTicker = null
 
     if (ticker) {
-      clearInterval(ticker);
+      clearInterval(ticker)
     }
   }
 
@@ -694,145 +690,121 @@ export class FaableAuthClient extends Base {
    * Runs the auto refresh token tick.
    */
   private async _autoRefreshTokenTick() {
-    this._debug("#_autoRefreshTokenTick()", "begin");
+    this._debug('#_autoRefreshTokenTick()', 'begin')
 
     try {
       await this.lock._acquireLock(0, async () => {
         try {
-          const now = Date.now();
+          const now = Date.now()
 
           try {
-            return await this._useSession(async (result) => {
+            return await this._useSession(async result => {
               const {
-                data: { session },
-              } = result;
+                data: { session }
+              } = result
 
               if (!session || !session.refresh_token || !session.expires_at) {
-                this._debug("#_autoRefreshTokenTick()", "no session");
-                return;
+                this._debug('#_autoRefreshTokenTick()', 'no session')
+                return
               }
 
               // session will expire in this many ticks (or has already expired if <= 0)
               const expiresInTicks = Math.floor(
                 (session.expires_at * 1000 - now) / AUTO_REFRESH_TICK_DURATION
-              );
+              )
 
               this._debug(
-                "#_autoRefreshTokenTick()",
+                '#_autoRefreshTokenTick()',
                 `access token expires in ${expiresInTicks} ticks, a tick lasts ${AUTO_REFRESH_TICK_DURATION}ms, refresh threshold is ${AUTO_REFRESH_TICK_THRESHOLD} ticks`
-              );
+              )
 
               if (expiresInTicks <= AUTO_REFRESH_TICK_THRESHOLD) {
-                await this._callRefreshToken(session.refresh_token);
+                await this._callRefreshToken(session.refresh_token)
               }
-            });
+            })
           } catch (e: any) {
             console.error(
-              "Auto refresh tick failed with error. This is likely a transient error.",
+              'Auto refresh tick failed with error. This is likely a transient error.',
               e
-            );
+            )
           }
         } finally {
-          this._debug("#_autoRefreshTokenTick()", "end");
+          this._debug('#_autoRefreshTokenTick()', 'end')
         }
-      });
+      })
     } catch (e: any) {
       if (e.isAcquireTimeout || e instanceof LockAcquireTimeoutError) {
-        this._debug("auto refresh token tick lock not available");
+        this._debug('auto refresh token tick lock not available')
       } else {
-        throw e;
+        throw e
       }
     }
   }
 
-  // /**
-  //  * Checks if the current URL and backing storage contain parameters given by a PKCE flow
-  //  */
-  // private async _isPKCEFlow(): Promise<boolean> {
-  //   const params = parseParametersFromURL(window.location.href);
-
-  //   const currentStorageContent = await getItemAsync(
-  //     this.storage,
-  //     `${this.storageKey}-code-verifier`
-  //   );
-
-  //   return !!(params.code && currentStorageContent);
-  // }
-
-  // /**
-  //  * Checks if the current URL contains parameters given by an implicit oauth grant flow (https://www.rfc-editor.org/rfc/rfc6749.html#section-4.2)
-  //  */
-  // private _isImplicitGrantFlow(): boolean {
-  //   const params = parseParametersFromURL(window.location.href);
-
-  //   return !!(isBrowser() && (params.access_token || params.error_description));
-  // }
-
   private async _detectFlowType(): Promise<AuthFlowType | null> {
-    const params = parseParametersFromURL(window?.location.href);
+    const params = parseParametersFromURL(window?.location.href)
 
-    const browser = isBrowser();
+    const browser = isBrowser()
 
     // PKCE
     if (browser && params.code) {
-      return "pkce";
+      return 'pkce'
     }
 
     // Implicit
     if (browser && (params.access_token || params.error_description)) {
-      return "implicit";
+      return 'implicit'
     }
-    return null;
+    return null
   }
 
   private _scope() {
-    return this.scope || "openid profile email";
+    return this.scope || 'openid profile email'
   }
 
   private async _getUrlForConnection(
     url: string,
     params: {
-      connection?: string;
-      redirectTo?: string;
-      scopes?: string;
-      response_type?: "code" | "token";
-      queryParams?: { [key: string]: string };
-      skipBrowserRedirect?: boolean;
+      connection?: string
+      connection_id?: string
+      redirectTo?: string
+      scopes?: string
+      response_type?: 'code' | 'token'
+      queryParams?: { [key: string]: string }
+      skipBrowserRedirect?: boolean
     }
   ) {
-    let urlParams: Record<string, any> = params.queryParams || {};
+    let urlParams: Record<string, any> = params.queryParams || {}
 
     const authorize_params: Record<string, any> = {
       client_id: this.clientId,
       response_type: params.response_type,
       redirect_uri:
-        params.redirectTo || this.redirect_uri || window?.location.origin,
-      scope: params.scopes || this._scope(),
-    };
+        params.redirectTo || this.redirectUri || window?.location.origin,
+      scope: params.scopes || this._scope()
+    }
 
-    const flowType = await this._detectFlowType();
-
-    if (flowType === "pkce") {
+    if (this.flowType === 'pkce') {
       const [codeChallenge, codeChallengeMethod] =
-        await getCodeChallengeAndMethod(this.storage, this.storageKey);
+        await getCodeChallengeAndMethod(this.storage, this.storageKey)
 
       urlParams = {
         ...urlParams,
         code_challenge: codeChallenge,
-        code_challenge_method: codeChallengeMethod,
-      };
+        code_challenge_method: codeChallengeMethod
+      }
     }
 
-    // Set connection if specified
-    if (params.connection) {
-      authorize_params.connection = params.connection;
+    if (params.connection_id) {
+      authorize_params.connection_id = params.connection_id
+    } else if (params.connection) {
+      authorize_params.connection = params.connection
     }
 
-    // Merge authorize params with urlParams
     return `${url}?${new URLSearchParams({
       ...urlParams,
-      ...authorize_params,
-    })}`;
+      ...authorize_params
+    })}`
   }
 
   async signInWithOauthConnection(
@@ -840,50 +812,44 @@ export class FaableAuthClient extends Base {
   ): Promise<OAuthResponse> {
     return await this._handleConnectionSignIn({
       connection: credentials.connection,
+      connection_id: credentials.connection_id,
       redirectTo: credentials?.redirectTo,
       scopes: credentials?.scopes,
       queryParams: credentials.queryParams,
-      skipBrowserRedirect: credentials.skipBrowserRedirect,
-    });
+      skipBrowserRedirect: credentials.skipBrowserRedirect
+    })
   }
 
   async signInWithUsernamePassword(data: {
-    username: string;
-    password: string;
-    redirect_uri?: string;
-    state?: string;
-  }) {
-    // Handle response and submit
-    const handleCallback = async (formHtml: string) => {
-      console.log("rawres");
-      console.log(rawAuthResponse);
-      const div = document.createElement("div");
-      div.innerHTML = formHtml;
-      const form = document.body.appendChild(div)
-        .children[0] as HTMLFormElement;
-
-      form.submit();
-    };
-
+    username: string
+    password: string
+    redirectTo?: string
+    state?: string
+  }): Promise<{ data: null; error: AuthError | null }> {
     const rawAuthResponse = await _post<string>(
       `${this.domainUrl}/usernamepassword/login`,
       {
         username: data.username,
         password: data.password,
         redirect_uri:
-          data.redirect_uri || this.redirect_uri || window?.location.origin,
+          data.redirectTo || this.redirectUri || window?.location.origin,
         client_id: this.clientId,
-        state: data.state,
+        state: data.state
       },
       { raw: true }
-    );
+    )
 
     if (!rawAuthResponse.data || rawAuthResponse.error) {
-      throw new Error(
-        rawAuthResponse.error || "Error in username password login"
-      );
+      return {
+        data: null,
+        error: new AuthUnknownError(
+          rawAuthResponse.error || 'Error in username password login',
+          rawAuthResponse.error
+        )
+      }
     }
-    handleCallback(rawAuthResponse.data);
+    buildAndSubmitForm(rawAuthResponse.data, document)
+    return { data: null, error: null }
   }
 
   /**
@@ -891,52 +857,53 @@ export class FaableAuthClient extends Base {
    * @param data The username and OTP code.
    */
   async signInWithOtp(data: {
-    username: string;
-    otp: string;
+    username: string
+    otp: string
   }): Promise<AuthResponse> {
     const rawResponse = await _post<Partial<RawAuthResponse>>(
       `${this.domainUrl}/oauth/token`,
       {
         client_id: this.clientId,
-        grant_type: "http://auth0.com/oauth/grant-type/passwordless/otp",
+        grant_type: 'http://auth0.com/oauth/grant-type/passwordless/otp',
         username: data.username,
-        otp: data.otp,
+        otp: data.otp
       }
-    );
+    )
 
-    const { data: sessionData, error } = _sessionResponse(rawResponse);
+    const { data: sessionData, error } = _sessionResponse(rawResponse)
 
     if (error) {
-      return { data: { user: null, session: null }, error };
+      return { data: { user: null, session: null }, error }
     }
 
     if (!sessionData || !sessionData.session) {
       return {
         data: { user: null, session: null },
-        error: new AuthInvalidTokenResponseError(),
-      };
+        error: new AuthInvalidTokenResponseError()
+      }
     }
 
-    const session = sessionData.session as Session;
+    const session = sessionData.session as Session
     const { data: user, error: userError } = await this._getUser(
       session.access_token
-    );
+    )
 
     if (userError || !user) {
       return {
         data: { user: null, session: null },
-        error: userError || new AuthUnknownError("Could not fetch user info", null),
-      };
+        error:
+          userError || new AuthUnknownError('Could not fetch user info', null)
+      }
     }
 
-    session.user = user;
-    await this._saveSession(session);
-    await this._notifyAllSubscribers("SIGNED_IN", session);
+    session.user = user
+    await this._saveSession(session)
+    await this._notifyAllSubscribers('SIGNED_IN', session)
 
     return {
       data: { user: session.user, session },
-      error: null,
-    };
+      error: null
+    }
   }
 
   /**
@@ -944,95 +911,102 @@ export class FaableAuthClient extends Base {
    * @param data The email and the type of delivery (code or link).
    */
   async signInWithPasswordless(data: {
-    email: string;
-    type: "code" | "link";
+    email: string
+    type: 'code' | 'link'
   }): Promise<{ data: any; error: AuthError | null }> {
     const response = await _post(`${this.domainUrl}/passwordless/start`, {
       client_id: this.clientId,
       email: data.email,
-      send: data.type,
-    });
+      send: data.type
+    })
 
-    return { data: response.data, error: response.error };
+    return { data: response.data, error: response.error }
   }
 
-  async changePassword(params: { email: string }) {
+  async changePassword(params: {
+    email: string
+  }): Promise<{ data: unknown; error: AuthError | null }> {
     if (!params?.email) {
-      throw new Error("email is required");
+      return {
+        data: null,
+        error: new AuthUnknownError('email is required', null)
+      }
     }
 
     const { data, error } = await _post(
       `${this.domainUrl}/dbconnections/change_password`,
-      {
-        email: params.email,
-      }
-    );
-    return data;
+      { email: params.email }
+    )
+    return {
+      data: data ?? null,
+      error: error ? new AuthUnknownError(String(error), error) : null
+    }
   }
 
   buildAuthorizeUrl(
     options: {
-      connection?: string;
-      redirectTo?: string;
-      scope?: string;
-      response_type?: string;
-      audience?: string;
+      connection?: string
+      redirectTo?: string
+      scope?: string
+      response_type?: string
+      audience?: string
     } = {}
   ): string {
-    const params = {
+    const params: Record<string, string | undefined> = {
       client_id: this.clientId,
       redirect_uri:
-        options.redirectTo || this.redirect_uri || window?.location.origin,
-      response_type: options.response_type || isBrowser() ? "code" : "token",
+        options.redirectTo || this.redirectUri || window?.location.origin,
+      response_type: resolveResponseType(options, isBrowser()),
       audience: options.audience,
       scope: options.scope,
-      connection: options.connection,
-    };
+      connection: options.connection
+    }
 
-    // Create a new object with only non-empty properties
-    const y = Object.fromEntries(
-      Object.entries(params).filter(([key, value]) => !!value)
-    ) as Record<string, string>;
+    const definedParams = Object.fromEntries(
+      Object.entries(params).filter(([, value]) => !!value)
+    ) as Record<string, string>
 
-    return `${this.domainUrl}/authorize?${new URLSearchParams(y).toString()}`;
+    return `${this.domainUrl}/authorize?${new URLSearchParams(definedParams).toString()}`
   }
 
   authorize(options: {
-    redirectTo?: string;
-    scope?: string;
-    response_type: string;
-    audience?: string;
+    redirectTo?: string
+    scope?: string
+    response_type: string
+    audience?: string
   }) {
-    const url = this.buildAuthorizeUrl(options);
-    windowHelpers.redirect(url);
+    const url = this.buildAuthorizeUrl(options)
+    windowHelpers.redirect(url)
   }
 
   private async _handleConnectionSignIn(options: {
-    connection?: string;
-    redirectTo?: string;
-    scopes?: string;
-    queryParams?: { [key: string]: string };
-    skipBrowserRedirect?: boolean;
+    connection?: string
+    connection_id?: string
+    redirectTo?: string
+    scopes?: string
+    queryParams?: { [key: string]: string }
+    skipBrowserRedirect?: boolean
   }) {
     const url: string = await this._getUrlForConnection(
       `${this.domainUrl}/authorize`,
       {
-        response_type: isBrowser() ? "code" : "token",
+        response_type: isBrowser() ? 'code' : 'token',
         connection: options.connection,
+        connection_id: options.connection_id,
         redirectTo: options.redirectTo,
         scopes: options.scopes,
-        queryParams: options.queryParams,
+        queryParams: options.queryParams
       }
-    );
+    )
 
-    this._debug("#_handleProviderSignIn()", "options", options, "url", url);
+    this._debug('#_handleConnectionSignIn()', 'options', options, 'url', url)
 
     // try to open on the browser
     if (isBrowser() && !options.skipBrowserRedirect) {
-      window?.location.assign(url);
+      window?.location.assign(url)
     }
 
-    return { data: { url }, error: null };
+    return { data: { url }, error: null }
   }
 
   /**
@@ -1041,14 +1015,14 @@ export class FaableAuthClient extends Base {
    * @param currentSession The current session that minimally contains an access token and refresh token.
    */
   async setSession(currentSession: {
-    access_token: string;
-    refresh_token: string;
+    access_token: string
+    refresh_token: string
   }): Promise<AuthResponse> {
-    await this.initializePromise;
+    await this.initializePromise
 
     return await this.lock._acquireLock(-1, async () => {
-      return await this._setSession(currentSession);
-    });
+      return await this._setSession(currentSession)
+    })
   }
 
   /**
@@ -1063,15 +1037,15 @@ export class FaableAuthClient extends Base {
    * will be emitted if this is detected. Use {@link #getUser()} instead.
    */
   async getSession() {
-    await this.initializePromise;
+    await this.initializePromise
 
     const result = await this.lock._acquireLock(-1, async () => {
-      return this._useSession(async (result) => {
-        return result;
-      });
-    });
+      return this._useSession(async result => {
+        return result
+      })
+    })
 
-    return result;
+    return result
   }
 
   /**
@@ -1084,34 +1058,34 @@ export class FaableAuthClient extends Base {
     fn: (
       result:
         | {
-          data: {
-            session: Session;
-          };
-          error: null;
-        }
+            data: {
+              session: Session
+            }
+            error: null
+          }
         | {
-          data: {
-            session: null;
-          };
-          error: AuthError;
-        }
+            data: {
+              session: null
+            }
+            error: AuthError
+          }
         | {
-          data: {
-            session: null;
-          };
-          error: null;
-        }
+            data: {
+              session: null
+            }
+            error: null
+          }
     ) => Promise<R>
   ): Promise<R> {
-    this._debug("#_useSession", "begin");
+    this._debug('#_useSession', 'begin')
 
     try {
       // the use of __loadSession here is the only correct use of the function!
-      const result = await this.__loadSession();
+      const result = await this.__loadSession()
 
-      return await fn(result);
+      return await fn(result)
     } finally {
-      this._debug("#_useSession", "end");
+      this._debug('#_useSession', 'end')
     }
   }
 
@@ -1122,170 +1096,159 @@ export class FaableAuthClient extends Base {
    */
   private async __loadSession(): Promise<
     | {
-      data: {
-        session: Session;
-      };
-      error: null;
-    }
+        data: {
+          session: Session
+        }
+        error: null
+      }
     | {
-      data: {
-        session: null;
-      };
-      error: AuthError;
-    }
+        data: {
+          session: null
+        }
+        error: AuthError
+      }
     | {
-      data: {
-        session: null;
-      };
-      error: null;
-    }
+        data: {
+          session: null
+        }
+        error: null
+      }
   > {
-    this._debug("#__loadSession()", "begin");
+    this._debug('#__loadSession()', 'begin')
 
     if (!this.lock.lockAcquired) {
       this._debug(
-        "#__loadSession()",
-        "used outside of an acquired lock!",
+        '#__loadSession()',
+        'used outside of an acquired lock!',
         new Error().stack
-      );
+      )
     }
 
     try {
-      let currentSession: Session | null = null;
+      let currentSession: Session | null = null
 
-      const maybeSession = await getItemAsync(this.storage, this.storageKey);
+      const maybeSession = await getItemAsync(this.storage, this.storageKey)
 
-      this._debug("#getSession()", "session from storage", maybeSession);
+      this._debug('#getSession()', 'session from storage', maybeSession)
 
       if (maybeSession !== null) {
-        if (this._isValidSession(maybeSession)) {
-          currentSession = maybeSession;
+        if (isValidSession(maybeSession)) {
+          currentSession = maybeSession
         } else {
-          this._debug("#getSession()", "session from storage is not valid");
-          await this._removeSession();
+          this._debug('#getSession()', 'session from storage is not valid')
+          await this._removeSession()
         }
       }
 
       if (!currentSession) {
-        return { data: { session: null }, error: null };
+        return { data: { session: null }, error: null }
       }
 
       const hasExpired = currentSession.expires_at
         ? currentSession.expires_at <= Date.now() / 1000
-        : false;
+        : false
 
       this._debug(
-        "#__loadSession()",
-        `session has${hasExpired ? "" : " not"} expired`,
-        "expires_at",
+        '#__loadSession()',
+        `session has${hasExpired ? '' : ' not'} expired`,
+        'expires_at',
         currentSession.expires_at
-      );
+      )
 
       if (!hasExpired) {
         if (this.storage.isServer) {
           const proxySession: Session = new Proxy(currentSession, {
             get(target: any, prop: string, receiver: any) {
-              if (prop === "user") {
+              if (prop === 'user') {
                 // only show warning when the user object is being accessed from the server
                 console.warn(
-                  "Using the user object as returned from supabase.auth.getSession() or from some supabase.auth.onAuthStateChange() events could be insecure! This value comes directly from the storage medium (usually cookies on the server) and many not be authentic. Use supabase.auth.getUser() instead which authenticates the data by contacting the Supabase Auth server."
-                );
+                  'Reading `session.user` from a server-side cookie store can be insecure: the value is whatever the cookie contains and has not been verified against Faable Auth. Re-fetch the user with `auth.getUser()` (or verify the access token yourself) before trusting it on the server.'
+                )
               }
-              return Reflect.get(target, prop, receiver);
-            },
-          });
-          currentSession = proxySession;
+              return Reflect.get(target, prop, receiver)
+            }
+          })
+          currentSession = proxySession
         }
 
-        return { data: { session: currentSession }, error: null };
+        return { data: { session: currentSession }, error: null }
       }
 
       const { session, error } = await this._callRefreshToken(
         currentSession.refresh_token
-      );
+      )
       if (error) {
-        return { data: { session: null }, error };
+        return { data: { session: null }, error }
       }
 
-      return { data: { session }, error: null };
+      return { data: { session }, error: null }
     } finally {
-      this._debug("#__loadSession()", "end");
+      this._debug('#__loadSession()', 'end')
     }
   }
 
   private async _removeSession() {
-    this._debug("#_removeSession()");
-    this._session = null;
+    this._debug('#_removeSession()')
+    this._session = null
     await this.storage.removeItem(this.storageKey)
   }
 
-  private _isValidSession(maybeSession: unknown): maybeSession is Session {
-    const isValidSession =
-      typeof maybeSession === "object" &&
-      maybeSession !== null &&
-      "access_token" in maybeSession &&
-      "refresh_token" in maybeSession &&
-      "expires_at" in maybeSession;
-
-    return isValidSession;
-  }
-
   protected async _setSession(currentSession: {
-    access_token: string;
-    refresh_token: string;
+    access_token: string
+    refresh_token: string
   }): Promise<AuthResponse> {
     try {
       if (!currentSession.access_token || !currentSession.refresh_token) {
-        throw new AuthSessionMissingError();
+        throw new AuthSessionMissingError()
       }
 
-      const timeNow = Date.now() / 1000;
-      let expiresAt = timeNow;
-      let hasExpired = true;
-      let session: Session | null = null;
-      const payload = decodeJWTPayload(currentSession.access_token);
+      const timeNow = Date.now() / 1000
+      let expiresAt = timeNow
+      let hasExpired = true
+      let session: Session | null = null
+      const payload = decodeJWTPayload(currentSession.access_token)
       if (payload.exp) {
-        expiresAt = payload.exp;
-        hasExpired = expiresAt <= timeNow;
+        expiresAt = payload.exp
+        hasExpired = expiresAt <= timeNow
       }
 
       if (hasExpired) {
         const { session: refreshedSession, error } =
-          await this._callRefreshToken(currentSession.refresh_token);
+          await this._callRefreshToken(currentSession.refresh_token)
         if (error) {
-          return { data: { user: null, session: null }, error: error };
+          return { data: { user: null, session: null }, error: error }
         }
 
         if (!refreshedSession) {
-          return { data: { user: null, session: null }, error: null };
+          return { data: { user: null, session: null }, error: null }
         }
-        session = refreshedSession;
+        session = refreshedSession
       } else {
         const { data: user, error } = await this._getUser(
           currentSession.access_token
-        );
+        )
         if (error || !user) {
-          throw error;
+          throw error
         }
         session = {
           access_token: currentSession.access_token,
           refresh_token: currentSession.refresh_token,
           user,
-          token_type: "bearer",
+          token_type: 'bearer',
           expires_in: expiresAt - timeNow,
-          expires_at: expiresAt,
-        };
-        await this._saveSession(session);
-        await this._notifyAllSubscribers("SIGNED_IN", session);
+          expires_at: expiresAt
+        }
+        await this._saveSession(session)
+        await this._notifyAllSubscribers('SIGNED_IN', session)
       }
 
-      return { data: { user: session.user, session }, error: null };
+      return { data: { user: session.user, session }, error: null }
     } catch (error) {
       if (isAuthError(error)) {
-        return { data: { session: null, user: null }, error };
+        return { data: { session: null, user: null }, error }
       }
 
-      throw error;
+      throw error
     }
   }
 
@@ -1294,72 +1257,76 @@ export class FaableAuthClient extends Base {
    * process to _startAutoRefreshToken if possible
    */
   private async _saveSession(session: Session) {
-    this._debug("#_saveSession()", session);
-    this._session = session;
+    this._debug('#_saveSession()', session)
+    this._session = session
 
-    await setItemAsync(this.storage, this.storageKey, session);
+    await setItemAsync(this.storage, this.storageKey, session)
   }
 
   private async _getUser(access_token: string) {
-    if (!access_token) throw new Error("Cannot fetch user without token");
-    this._debug("#_getUser() begin");
+    if (!access_token) throw new Error('Cannot fetch user without token')
+    this._debug('#_getUser() begin')
     const res = await _get<User>(`${this.domainUrl}/me`, {
-      token: access_token,
-    });
-    this._debug("#_getUser() end");
-    return { data: res.data, error: res.error };
+      token: access_token
+    })
+    this._debug('#_getUser() end')
+    return { data: res.data, error: res.error }
   }
 
   private async _callRefreshToken(refreshToken: string) {
     if (!refreshToken) {
-      throw new AuthSessionMissingError();
+      throw new AuthSessionMissingError()
     }
 
     // refreshing is already in progress
     if (this.refreshingDeferred) {
-      return this.refreshingDeferred.promise;
+      return this.refreshingDeferred.promise
     }
 
-    const debugName = `#_callRefreshToken(${refreshToken.substring(0, 5)}...)`;
+    const debugName = `#_callRefreshToken(${refreshToken.substring(0, 5)}...)`
 
-    this._debug(debugName, "begin");
+    this._debug(debugName, 'begin')
 
     try {
-      this.refreshingDeferred = new Deferred<CallRefreshTokenResult>();
+      this.refreshingDeferred = new Deferred<CallRefreshTokenResult>()
 
-      const { data, error } = await this._refreshAccessToken(refreshToken);
-      if (error) throw error;
-      if (!data.session) throw new AuthSessionMissingError();
+      const { data, error } = await withTimeout(
+        this._refreshAccessToken(refreshToken),
+        REFRESH_TIMEOUT_MS,
+        'Token refresh timed out'
+      )
+      if (error) throw error
+      if (!data.session) throw new AuthSessionMissingError()
 
-      await this._saveSession(data.session);
-      await this._notifyAllSubscribers("TOKEN_REFRESHED", data.session);
+      await this._saveSession(data.session)
+      await this._notifyAllSubscribers('TOKEN_REFRESHED', data.session)
 
-      const result = { session: data.session, error: null };
+      const result = { session: data.session, error: null }
 
-      this.refreshingDeferred.resolve(result);
+      this.refreshingDeferred.resolve(result)
 
-      return result;
+      return result
     } catch (error) {
-      this._debug(debugName, "error", error);
+      this._debug(debugName, 'error', error)
 
       if (isAuthError(error)) {
-        const result = { session: null, error };
+        const result = { session: null, error }
 
         if (!isAuthRetryableFetchError(error)) {
-          await this._removeSession();
-          await this._notifyAllSubscribers("SIGNED_OUT", null);
+          await this._removeSession()
+          await this._notifyAllSubscribers('SIGNED_OUT', null)
         }
 
-        this.refreshingDeferred?.resolve(result);
+        this.refreshingDeferred?.resolve(result)
 
-        return result;
+        return result
       }
 
-      this.refreshingDeferred?.reject(error);
-      throw error;
+      this.refreshingDeferred?.reject(error)
+      throw error
     } finally {
-      this.refreshingDeferred = null;
-      this._debug(debugName, "end");
+      this.refreshingDeferred = null
+      this._debug(debugName, 'end')
     }
   }
 
@@ -1370,24 +1337,21 @@ export class FaableAuthClient extends Base {
   private async _refreshAccessToken(
     refreshToken: string
   ): Promise<AuthResponse> {
-    const debugName = `#_refreshAccessToken(${refreshToken.substring(
-      0,
-      5
-    )}...)`;
-    this._debug(debugName, "begin");
+    const debugName = `#_refreshAccessToken(${refreshToken.substring(0, 5)}...)`
+    this._debug(debugName, 'begin')
 
     try {
-      const startedAt = Date.now();
+      const startedAt = Date.now()
 
       // will attempt to refresh the token with exponential backoff
 
       return await retryable(
-        async (attempt) => {
+        async attempt => {
           if (attempt > 0) {
-            await sleep(200 * Math.pow(2, attempt - 1)); // 200, 400, 800, ...
+            await sleep(200 * Math.pow(2, attempt - 1)) // 200, 400, 800, ...
           }
 
-          this._debug(debugName, "refreshing attempt", attempt);
+          this._debug(debugName, 'refreshing attempt', attempt)
 
           // return await _post(`${this.url}/token?grant_type=refresh_token`, {
           //   body: { refresh_token: refreshToken },
@@ -1398,59 +1362,65 @@ export class FaableAuthClient extends Base {
             `${this.domainUrl}/oauth/token`,
             {
               client_id: this.clientId,
-              grant_type: "refresh_token",
-              refresh_token: refreshToken,
+              grant_type: 'refresh_token',
+              refresh_token: refreshToken
             }
-          );
-          const session_res = _sessionResponse(rawResponse);
+          )
+          if (rawResponse.error) {
+            throw new AuthUnknownError(
+              `Refresh token request failed: ${rawResponse.error}`,
+              rawResponse.error
+            )
+          }
+          const session_res = _sessionResponse(rawResponse)
 
           if (!session_res.data.session?.access_token) {
-            throw new Error("Bad user");
+            throw new AuthInvalidTokenResponseError()
           }
           const { data: user, error } = await this._getUser(
             session_res.data.session?.access_token
-          );
+          )
 
           if (error) {
-            throw new Error("Error requesting user");
+            throw new AuthUnknownError('Could not fetch user info', error)
           }
           if (!user) {
-            throw new Error("No user found");
+            throw new AuthUnknownError('Refresh response missing user', null)
           }
 
           const x = {
             data: {
               session: {
                 ...session_res.data.session,
-                user,
+                user
               },
-              user,
+              user
             },
-            error: null,
-          };
+            error: null
+          }
           // this._debug(x);
-          return x;
+          return x
         },
         (attempt, error) => {
-          const nextBackOffInterval = 200 * Math.pow(2, attempt);
+          const nextBackOffInterval = 200 * Math.pow(2, attempt)
           return (
             error &&
             isAuthRetryableFetchError(error) &&
             // retryable only if the request can be sent before the backoff overflows the tick duration
             Date.now() + nextBackOffInterval - startedAt <
-            AUTO_REFRESH_TICK_DURATION
-          );
+              AUTO_REFRESH_TICK_DURATION
+          )
         }
-      );
+      )
     } catch (error) {
-      this._debug(debugName, "error", error);
+      this._debug(debugName, 'error', error)
 
       if (isAuthError(error)) {
-        return { data: { session: null, user: null }, error };
+        return { data: { session: null, user: null }, error }
       }
-      throw error;
+      throw error
     } finally {
-      this._debug(debugName, "end");
+      this._debug(debugName, 'end')
     }
   }
 
@@ -1459,36 +1429,12 @@ export class FaableAuthClient extends Base {
     session: Session | null,
     broadcast = true
   ) {
-    const debugName = `#_notifyAllSubscribers(${event})`;
-    this._debug(debugName, "begin", session, `broadcast = ${broadcast}`);
-
+    const debugName = `#_notifyAllSubscribers(${event})`
+    this._debug(debugName, 'begin', session, `broadcast = ${broadcast}`)
     try {
-      if (this.broadcastChannel && broadcast) {
-        this.broadcastChannel.postMessage({ event, session });
-      }
-
-      const errors: any[] = [];
-      const promises = Array.from(this.stateChangeEmitters.values()).map(
-        async (x) => {
-          try {
-            await x.callback(event, session);
-          } catch (e: any) {
-            errors.push(e);
-          }
-        }
-      );
-
-      await Promise.all(promises);
-
-      if (errors.length > 0) {
-        for (let i = 0; i < errors.length; i += 1) {
-          console.error(errors[i]);
-        }
-
-        throw errors[0];
-      }
+      await this.broadcastSync.notify(event, session, broadcast)
     } finally {
-      this._debug(debugName, "end");
+      this._debug(debugName, 'end')
     }
   }
 
@@ -1501,28 +1447,28 @@ export class FaableAuthClient extends Base {
    * If using `others` scope, no `SIGNED_OUT` event is fired!
    */
   async signOut(
-    options: SignOut = { scope: "global" }
+    options: SignOut = { scope: 'global' }
   ): Promise<{ error: AuthError | null }> {
-    await this.initializePromise;
+    await this.initializePromise
 
     return await this.lock._acquireLock(-1, async () => {
-      return await this._signOut(options);
-    });
+      return await this._signOut(options)
+    })
   }
 
   protected async _signOut(
-    { scope, returnTo }: SignOut & { returnTo?: string } = { scope: "global" }
+    { scope }: SignOut = { scope: 'global' }
   ): Promise<{ error: AuthError | null }> {
-    return await this._useSession(async (result) => {
-      const { data, error: sessionError } = result;
+    return await this._useSession(async result => {
+      const { data, error: sessionError } = result
       if (sessionError) {
-        return { error: sessionError };
+        return { error: sessionError }
       }
-      const accessToken = data.session?.access_token;
+      const accessToken = data.session?.access_token
       if (accessToken) {
         const { error } = await this.api.signOut({
-          client_id: this.clientId,
-        });
+          client_id: this.clientId
+        })
         if (error) {
           // ignore 404s since user might not exist anymore
           // ignore 401s since an invalid or expired JWT should sign out the current session
@@ -1532,17 +1478,17 @@ export class FaableAuthClient extends Base {
               (error.status === 404 || error.status === 401)
             )
           ) {
-            return { error };
+            return { error }
           }
         }
       }
-      if (scope !== "others") {
-        await this._removeSession();
+      if (scope !== 'others') {
+        await this._removeSession()
         await this.storage.removeItem(`${this.storageKey}-code-verifier`)
-        await this._notifyAllSubscribers("SIGNED_OUT", null);
+        await this._notifyAllSubscribers('SIGNED_OUT', null)
       }
-      return { error: null };
-    });
+      return { error: null }
+    })
   }
 
   /**
@@ -1555,58 +1501,53 @@ export class FaableAuthClient extends Base {
       session: Session | null
     ) => void | Promise<void>
   ): {
-    data: { subscription: Subscription };
+    data: { subscription: Subscription }
   } {
-    const id: string = uuid();
-    const subscription: Subscription = {
-      id,
-      callback,
-      unsubscribe: () => {
-        this._debug(
-          "#unsubscribe()",
-          "state change callback with id removed",
-          id
-        );
-
-        this.stateChangeEmitters.delete(id);
-      },
-    };
-
-    this._debug("#onAuthStateChange()", "registered callback with id", id);
-
-    this.stateChangeEmitters.set(id, subscription);
-    (async () => {
-      await this.initializePromise;
-
+    const { subscription } = this.broadcastSync.subscribe(callback)
+    this._debug(
+      '#onAuthStateChange()',
+      'registered callback with id',
+      subscription.id
+    )
+    ;(async () => {
+      await this.initializePromise
       await this.lock._acquireLock(-1, async () => {
-        this._emitInitialSession(id);
-      });
-    })();
+        this._emitInitialSession(subscription)
+      })
+    })()
 
-    return { data: { subscription } };
+    return { data: { subscription } }
   }
 
-  private async _emitInitialSession(id: string): Promise<void> {
-    return await this._useSession(async (result) => {
+  private async _emitInitialSession(subscription: Subscription): Promise<void> {
+    return await this._useSession(async result => {
       try {
         const {
           data: { session },
-          error,
-        } = result;
-        if (error) throw error;
+          error
+        } = result
+        if (error) throw error
 
-        await this.stateChangeEmitters
-          .get(id)
-          ?.callback("INITIAL_SESSION", session);
-        this._debug("INITIAL_SESSION", "callback id", id, "session", session);
+        await subscription.callback('INITIAL_SESSION', session)
+        this._debug(
+          'INITIAL_SESSION',
+          'callback id',
+          subscription.id,
+          'session',
+          session
+        )
       } catch (err) {
-        await this.stateChangeEmitters
-          .get(id)
-          ?.callback("INITIAL_SESSION", null);
-        this._debug("INITIAL_SESSION", "callback id", id, "error", err);
-        console.error(err);
+        await subscription.callback('INITIAL_SESSION', null)
+        this._debug(
+          'INITIAL_SESSION',
+          'callback id',
+          subscription.id,
+          'error',
+          err
+        )
+        console.error(err)
       }
-    });
+    })
   }
 
   /**
@@ -1616,52 +1557,52 @@ export class FaableAuthClient extends Base {
    * @param currentSession The current session. If passed in, it must contain a refresh token.
    */
   async refreshSession(currentSession?: {
-    refresh_token: string;
+    refresh_token: string
   }): Promise<AuthResponse> {
-    await this.initializePromise;
+    await this.initializePromise
 
     return await this.lock._acquireLock(-1, async () => {
-      return await this._refreshSession(currentSession);
-    });
+      return await this._refreshSession(currentSession)
+    })
   }
 
   protected async _refreshSession(currentSession?: {
-    refresh_token: string;
+    refresh_token: string
   }): Promise<AuthResponse> {
     try {
-      return await this._useSession(async (result) => {
+      return await this._useSession(async result => {
         if (!currentSession) {
-          const { data, error } = result;
+          const { data, error } = result
           if (error) {
-            throw error;
+            throw error
           }
 
-          currentSession = data.session ?? undefined;
+          currentSession = data.session ?? undefined
         }
 
         if (!currentSession?.refresh_token) {
-          throw new AuthSessionMissingError();
+          throw new AuthSessionMissingError()
         }
 
         const { session, error } = await this._callRefreshToken(
           currentSession.refresh_token
-        );
+        )
         if (error) {
-          return { data: { user: null, session: null }, error: error };
+          return { data: { user: null, session: null }, error: error }
         }
 
         if (!session) {
-          return { data: { user: null, session: null }, error: null };
+          return { data: { user: null, session: null }, error: null }
         }
 
-        return { data: { user: (session as any).user, session }, error: null };
-      });
+        return { data: { user: (session as any).user, session }, error: null }
+      })
     } catch (error) {
       if (isAuthError(error)) {
-        return { data: { user: null, session: null }, error };
+        return { data: { user: null, session: null }, error }
       }
 
-      throw error;
+      throw error
     }
   }
 }

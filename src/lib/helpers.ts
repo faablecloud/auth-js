@@ -1,87 +1,84 @@
-import { AuthResponse, SupportedStorage, User, UserResponse } from "./types";
-import { setItemAsync } from "./storage_helpers";
-import { JsonResponse } from "./fetch";
+import { JsonResponse } from './fetch'
+import { saveCodeVerifier } from './pkce_storage'
+import { AuthResponse, SupportedStorage, User } from './types'
 
 function dec2hex(dec: number) {
-  return ("0" + dec.toString(16)).substr(-2);
+  return ('0' + dec.toString(16)).substr(-2)
 }
 
 export function decodeBase64URL(value: string): string {
   const key =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
-  let base64 = "";
-  let chr1, chr2, chr3;
-  let enc1, enc2, enc3, enc4;
-  let i = 0;
-  value = value.replace("-", "+").replace("_", "/");
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='
+  let base64 = ''
+  let chr1, chr2, chr3
+  let enc1, enc2, enc3, enc4
+  let i = 0
+  value = value.replace('-', '+').replace('_', '/')
 
   while (i < value.length) {
-    enc1 = key.indexOf(value.charAt(i++));
-    enc2 = key.indexOf(value.charAt(i++));
-    enc3 = key.indexOf(value.charAt(i++));
-    enc4 = key.indexOf(value.charAt(i++));
-    chr1 = (enc1 << 2) | (enc2 >> 4);
-    chr2 = ((enc2 & 15) << 4) | (enc3 >> 2);
-    chr3 = ((enc3 & 3) << 6) | enc4;
-    base64 = base64 + String.fromCharCode(chr1);
+    enc1 = key.indexOf(value.charAt(i++))
+    enc2 = key.indexOf(value.charAt(i++))
+    enc3 = key.indexOf(value.charAt(i++))
+    enc4 = key.indexOf(value.charAt(i++))
+    chr1 = (enc1 << 2) | (enc2 >> 4)
+    chr2 = ((enc2 & 15) << 4) | (enc3 >> 2)
+    chr3 = ((enc3 & 3) << 6) | enc4
+    base64 = base64 + String.fromCharCode(chr1)
 
     if (enc3 != 64 && chr2 != 0) {
-      base64 = base64 + String.fromCharCode(chr2);
+      base64 = base64 + String.fromCharCode(chr2)
     }
     if (enc4 != 64 && chr3 != 0) {
-      base64 = base64 + String.fromCharCode(chr3);
+      base64 = base64 + String.fromCharCode(chr3)
     }
   }
-  return base64;
+  return base64
 }
 
-// Functions below taken from: https://stackoverflow.com/questions/63309409/creating-a-code-verifier-and-challenge-for-pkce-auth-on-spotify-api-in-reactjs
 export function generatePKCEVerifier() {
-  const verifierLength = 56;
-  const array = new Uint32Array(verifierLength);
-  if (typeof crypto === "undefined") {
-    const charSet =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
-    const charSetLen = charSet.length;
-    let verifier = "";
-    for (let i = 0; i < verifierLength; i++) {
-      verifier += charSet.charAt(Math.floor(Math.random() * charSetLen));
-    }
-    return verifier;
+  if (
+    typeof crypto === 'undefined' ||
+    typeof crypto.getRandomValues !== 'function'
+  ) {
+    throw new Error(
+      'Web Crypto API is required to generate a PKCE code verifier'
+    )
   }
-  crypto.getRandomValues(array);
-  return Array.from(array, dec2hex).join("");
+  const verifierLength = 56
+  const array = new Uint32Array(verifierLength)
+  crypto.getRandomValues(array)
+  return Array.from(array, dec2hex).join('')
 }
 
 async function sha256(randomString: string) {
-  const encoder = new TextEncoder();
-  const encodedData = encoder.encode(randomString);
-  const hash = await crypto.subtle.digest("SHA-256", encodedData);
-  const bytes = new Uint8Array(hash);
+  const encoder = new TextEncoder()
+  const encodedData = encoder.encode(randomString)
+  const hash = await crypto.subtle.digest('SHA-256', encodedData)
+  const bytes = new Uint8Array(hash)
 
   return Array.from(bytes)
-    .map((c) => String.fromCharCode(c))
-    .join("");
+    .map(c => String.fromCharCode(c))
+    .join('')
 }
 
 function base64urlencode(str: string) {
-  return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 export async function generatePKCEChallenge(verifier: string) {
   const hasCryptoSupport =
-    typeof crypto !== "undefined" &&
-    typeof crypto.subtle !== "undefined" &&
-    typeof TextEncoder !== "undefined";
+    typeof crypto !== 'undefined' &&
+    typeof crypto.subtle !== 'undefined' &&
+    typeof TextEncoder !== 'undefined'
 
   if (!hasCryptoSupport) {
     console.warn(
-      "WebCrypto API is not supported. Code challenge method will default to use plain instead of sha256."
-    );
-    return verifier;
+      'WebCrypto API is not supported. Code challenge method will default to use plain instead of sha256.'
+    )
+    return verifier
   }
-  const hashed = await sha256(verifier);
-  return base64urlencode(hashed);
+  const hashed = await sha256(verifier)
+  return base64urlencode(hashed)
 }
 
 export async function getCodeChallengeAndMethod(
@@ -89,112 +86,107 @@ export async function getCodeChallengeAndMethod(
   storageKey: string,
   isPasswordRecovery = false
 ) {
-  const codeVerifier = generatePKCEVerifier();
-  let storedCodeVerifier = codeVerifier;
-  if (isPasswordRecovery) {
-    storedCodeVerifier += "/PASSWORD_RECOVERY";
-  }
-  await setItemAsync(
-    storage,
-    `${storageKey}-code-verifier`,
-    storedCodeVerifier
-  );
-  const codeChallenge = await generatePKCEChallenge(codeVerifier);
-  const codeChallengeMethod = codeVerifier === codeChallenge ? "plain" : "S256";
-  return [codeChallenge, codeChallengeMethod];
+  const codeVerifier = generatePKCEVerifier()
+  await saveCodeVerifier(storage, `${storageKey}-code-verifier`, {
+    verifier: codeVerifier,
+    redirectType: isPasswordRecovery ? 'PASSWORD_RECOVERY' : undefined
+  })
+  const codeChallenge = await generatePKCEChallenge(codeVerifier)
+  const codeChallengeMethod = codeVerifier === codeChallenge ? 'plain' : 'S256'
+  return [codeChallenge, codeChallengeMethod]
 }
 
-export const isBrowser = () => typeof document !== "undefined";
+export const isBrowser = () => typeof document !== 'undefined'
 
 const localStorageWriteTests = {
   tested: false,
-  writable: false,
-};
+  writable: false
+}
 
 /**
  * Checks whether localStorage is supported on this browser.
  */
 export const supportsLocalStorage = () => {
   if (!isBrowser()) {
-    return false;
+    return false
   }
 
   try {
-    if (typeof globalThis.localStorage !== "object") {
-      return false;
+    if (typeof globalThis.localStorage !== 'object') {
+      return false
     }
-  } catch (e) {
+  } catch (_e) {
     // DOM exception when accessing `localStorage`
-    return false;
+    return false
   }
 
   if (localStorageWriteTests.tested) {
-    return localStorageWriteTests.writable;
+    return localStorageWriteTests.writable
   }
 
-  const randomKey = `lswt-${Math.random()}${Math.random()}`;
+  const randomKey = `lswt-${Math.random()}${Math.random()}`
 
   try {
-    globalThis.localStorage.setItem(randomKey, randomKey);
-    globalThis.localStorage.removeItem(randomKey);
+    globalThis.localStorage.setItem(randomKey, randomKey)
+    globalThis.localStorage.removeItem(randomKey)
 
-    localStorageWriteTests.tested = true;
-    localStorageWriteTests.writable = true;
-  } catch (e) {
+    localStorageWriteTests.tested = true
+    localStorageWriteTests.writable = true
+  } catch (_e) {
     // localStorage can't be written to
     // https://www.chromium.org/for-testers/bug-reporting-guidelines/uncaught-securityerror-failed-to-read-the-localstorage-property-from-window-access-is-denied-for-this-document
 
-    localStorageWriteTests.tested = true;
-    localStorageWriteTests.writable = false;
+    localStorageWriteTests.tested = true
+    localStorageWriteTests.writable = false
   }
 
-  return localStorageWriteTests.writable;
-};
+  return localStorageWriteTests.writable
+}
 
 export function uuid() {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
     const r = (Math.random() * 16) | 0,
-      v = c == "x" ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
+      v = c == 'x' ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
 }
 
 export type RawAuthResponse = {
-  expires_at: number;
-  expires_in: number;
-  user: User;
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
-};
+  expires_at: number
+  expires_in: number
+  user: User
+  access_token: string
+  refresh_token: string
+  token_type: string
+}
 /**
  * hasSession checks if the response object contains a valid session
  * @param data A response object
  * @returns true if a session is in the response
  */
 function hasSession(data: Partial<RawAuthResponse>): data is RawAuthResponse {
-  return !!data.access_token && !!data.refresh_token && !!data.expires_in;
+  return !!data.access_token && !!data.refresh_token && !!data.expires_in
 }
 
 export function expiresAt(expiresIn: number) {
-  const timeNow = Math.round(Date.now() / 1000);
-  return timeNow + expiresIn;
+  const timeNow = Math.round(Date.now() / 1000)
+  return timeNow + expiresIn
 }
 
 export function _sessionResponse({
-  data,
+  data
 }: JsonResponse<Partial<RawAuthResponse>>): AuthResponse {
-  let session = null;
-  if (!data) throw new Error("Bad session response");
+  let session = null
+  if (!data) throw new Error('Bad session response')
   if (hasSession(data)) {
-    session = { ...data };
+    session = { ...data }
     if (!data.expires_at && data.expires_in) {
-      session.expires_at = expiresAt(data.expires_in);
+      session.expires_at = expiresAt(data.expires_in)
     }
   }
 
-  const user: User = data.user ?? (data as User);
-  return { data: { session, user }, error: null };
+  const user: User = data.user ?? (data as User)
+  return { data: { session, user }, error: null }
 }
 
 /**
@@ -203,22 +195,19 @@ export function _sessionResponse({
  * Taken from: https://github.com/mike-north/types/blob/master/src/async.ts
  */
 export class Deferred<T = any> {
-  public static promiseConstructor: PromiseConstructor = Promise;
+  public static promiseConstructor: PromiseConstructor = Promise
 
-  public readonly promise!: PromiseLike<T>;
+  public readonly promise!: PromiseLike<T>
 
-  public readonly resolve!: (value?: T | PromiseLike<T>) => void;
+  public readonly resolve!: (value?: T | PromiseLike<T>) => void
 
-  public readonly reject!: (reason?: any) => any;
+  public readonly reject!: (reason?: any) => any
 
   public constructor() {
-    // eslint-disable-next-line @typescript-eslint/no-extra-semi
-    (this as any).promise = new Deferred.promiseConstructor((res, rej) => {
-      // eslint-disable-next-line @typescript-eslint/no-extra-semi
-      (this as any).resolve = res;
-      // eslint-disable-next-line @typescript-eslint/no-extra-semi
-      (this as any).reject = rej;
-    });
+    ;(this as any).promise = new Deferred.promiseConstructor((res, rej) => {
+      ;(this as any).resolve = res
+      ;(this as any).reject = rej
+    })
   }
 }
 
@@ -232,78 +221,77 @@ export function retryable<T>(
   isRetryable: (attempt: number, error: any | null, result?: T) => boolean
 ): Promise<T> {
   const promise = new Promise<T>((accept, reject) => {
-    // eslint-disable-next-line @typescript-eslint/no-extra-semi
-    (async () => {
+    ;(async () => {
       for (let attempt = 0; attempt < Infinity; attempt++) {
         try {
-          const result = await fn(attempt);
+          const result = await fn(attempt)
 
           if (!isRetryable(attempt, null, result)) {
-            accept(result);
-            return;
+            accept(result)
+            return
           }
         } catch (e: any) {
           if (!isRetryable(attempt, e)) {
-            reject(e);
-            return;
+            reject(e)
+            return
           }
         }
       }
-    })();
-  });
+    })()
+  })
 
-  return promise;
+  return promise
 }
 
 /**
  * Creates a promise that resolves to null after some time.
  */
 export async function sleep(time: number): Promise<null> {
-  return new Promise((accept) => {
-    setTimeout(() => accept(null), time);
-  });
+  return new Promise(accept => {
+    setTimeout(() => accept(null), time)
+  })
 }
 
 export const checkExpiresInTime = ({
   expires_in,
   expires_at,
-  refreshTick,
+  refreshTick
 }: {
-  expires_in: string;
-  expires_at?: string;
-  refreshTick: number;
+  expires_in: string
+  expires_at?: string
+  refreshTick: number
 }) => {
-  const timeNow = Math.round(Date.now() / 1000);
-  const expiresIn = parseInt(expires_in);
-  let expiresAt = timeNow + expiresIn;
+  const timeNow = Math.round(Date.now() / 1000)
+  const expiresIn = parseInt(expires_in)
+  let expiresAt = timeNow + expiresIn
 
   if (expires_at) {
-    expiresAt = parseInt(expires_at);
+    expiresAt = parseInt(expires_at)
   }
 
-  const actuallyExpiresIn = expiresAt - timeNow;
+  const actuallyExpiresIn = expiresAt - timeNow
   if (actuallyExpiresIn * 1000 <= refreshTick) {
     console.warn(
-      `@supabase/gotrue-js: Session as retrieved from URL expires in ${actuallyExpiresIn}s, should have been closer to ${expiresIn}s`
-    );
+      `@faable/auth-js: Session as retrieved from URL expires in ${actuallyExpiresIn}s, should have been closer to ${expiresIn}s`
+    )
   }
 
-  const issuedAt = expiresAt - expiresIn;
+  const issuedAt = expiresAt - expiresIn
   if (timeNow - issuedAt >= 120) {
     console.warn(
-      "@supabase/gotrue-js: Session as retrieved from URL was issued over 120s ago, URL could be stale",
+      '@faable/auth-js: Session as retrieved from URL was issued over 120s ago, URL could be stale',
       issuedAt,
       expiresAt,
       timeNow
-    );
+    )
   } else if (timeNow - issuedAt < 0) {
     console.warn(
-      "@supabase/gotrue-js: Session as retrieved from URL was issued in the future? Check the device clok for skew",
+      '@faable/auth-js: Session as retrieved from URL was issued in the future? Check the device clok for skew',
       issuedAt,
       expiresAt,
       timeNow
-    );
+    )
   }
 
-  return { expiresIn, expiresAt };
-};
+  return { expiresIn, expiresAt }
+}

@@ -1,4 +1,4 @@
-import { supportsLocalStorage } from "../lib/helpers";
+import { supportsLocalStorage } from '../lib/helpers'
 
 /**
  * Provide your own global lock implementation instead of the default
@@ -19,7 +19,7 @@ export type LockFunc = <R>(
   name: string,
   acquireTimeout: number,
   fn: () => Promise<R>
-) => Promise<R>;
+) => Promise<R>
 
 /**
  * @experimental
@@ -32,9 +32,9 @@ export const internals = {
     globalThis &&
     supportsLocalStorage() &&
     globalThis.localStorage &&
-    globalThis.localStorage.getItem("supabase.gotrue-js.locks.debug") === "true"
-  ),
-};
+    globalThis.localStorage.getItem('faable.auth.locks.debug') === 'true'
+  )
+}
 
 /**
  * An error thrown when a lock cannot be acquired after some amount of time.
@@ -42,10 +42,10 @@ export const internals = {
  * Use the {@link #isAcquireTimeout} property instead of checking with `instanceof`.
  */
 export abstract class LockAcquireTimeoutError extends Error {
-  public readonly isAcquireTimeout = true;
+  public readonly isAcquireTimeout = true
 
   constructor(message: string) {
-    super(message);
+    super(message)
   }
 }
 
@@ -55,10 +55,10 @@ export class NavigatorLockAcquireTimeoutError extends LockAcquireTimeoutError {}
  * Implements a global exclusive lock using the Navigator LockManager API. It
  * is available on all browsers released after 2022-03-15 with Safari being the
  * last one to release support. If the API is not available, this function will
- * throw. Make sure you check availablility before configuring {@link
- * GoTrueClient}.
+ * throw. Make sure you check availability before passing this lock to the
+ * client.
  *
- * You can turn on debugging by setting the `supabase.gotrue-js.locks.debug`
+ * You can turn on debugging by setting the `faable.auth.locks.debug`
  * local storage item to `true`.
  *
  * Internals:
@@ -83,24 +83,21 @@ export async function navigatorLock<R>(
 ): Promise<R> {
   if (internals.debug) {
     console.log(
-      "@supabase/gotrue-js: navigatorLock: acquire lock",
+      '@faable/auth-js: navigatorLock: acquire lock',
       name,
       acquireTimeout
-    );
+    )
   }
 
-  const abortController = new globalThis.AbortController();
+  const abortController = new globalThis.AbortController()
 
   if (acquireTimeout > 0) {
     setTimeout(() => {
-      abortController.abort();
+      abortController.abort()
       if (internals.debug) {
-        console.log(
-          "@supabase/gotrue-js: navigatorLock acquire timed out",
-          name
-        );
+        console.log('@faable/auth-js: navigatorLock acquire timed out', name)
       }
-    }, acquireTimeout);
+    }, acquireTimeout)
   }
 
   // MDN article: https://developer.mozilla.org/en-US/docs/Web/API/LockManager/request
@@ -109,60 +106,60 @@ export async function navigatorLock<R>(
     name,
     acquireTimeout === 0
       ? {
-          mode: "exclusive",
-          ifAvailable: true,
+          mode: 'exclusive',
+          ifAvailable: true
         }
       : {
-          mode: "exclusive",
-          signal: abortController.signal,
+          mode: 'exclusive',
+          signal: abortController.signal
         },
-    async (lock) => {
+    async lock => {
       if (lock) {
         if (internals.debug) {
           console.log(
-            "@supabase/gotrue-js: navigatorLock: acquired",
+            '@faable/auth-js: navigatorLock: acquired',
             name,
             lock.name
-          );
+          )
         }
 
         try {
-          return await fn();
+          return await fn()
         } finally {
           if (internals.debug) {
             console.log(
-              "@supabase/gotrue-js: navigatorLock: released",
+              '@faable/auth-js: navigatorLock: released',
               name,
               lock.name
-            );
+            )
           }
         }
       } else {
         if (acquireTimeout === 0) {
           if (internals.debug) {
             console.log(
-              "@supabase/gotrue-js: navigatorLock: not immediately available",
+              '@faable/auth-js: navigatorLock: not immediately available',
               name
-            );
+            )
           }
 
           throw new NavigatorLockAcquireTimeoutError(
             `Acquiring an exclusive Navigator LockManager lock "${name}" immediately failed`
-          );
+          )
         } else {
           if (internals.debug) {
             try {
-              const result = await globalThis.navigator.locks.query();
+              const result = await globalThis.navigator.locks.query()
 
               console.log(
-                "@supabase/gotrue-js: Navigator LockManager state",
-                JSON.stringify(result, null, "  ")
-              );
+                '@faable/auth-js: Navigator LockManager state',
+                JSON.stringify(result, null, '  ')
+              )
             } catch (e: any) {
               console.warn(
-                "@supabase/gotrue-js: Error when querying Navigator LockManager state",
+                '@faable/auth-js: Error when querying Navigator LockManager state',
                 e
-              );
+              )
             }
           }
 
@@ -171,14 +168,14 @@ export async function navigatorLock<R>(
           // pretend the lock is acquired in the name of backward compatibility
           // and user experience and just run the function.
           console.warn(
-            "@supabase/gotrue-js: Navigator LockManager returned a null lock when using #request without ifAvailable set to true, it appears this browser is not following the LockManager spec https://developer.mozilla.org/en-US/docs/Web/API/LockManager/request"
-          );
+            '@faable/auth-js: Navigator LockManager returned a null lock when using #request without ifAvailable set to true, it appears this browser is not following the LockManager spec https://developer.mozilla.org/en-US/docs/Web/API/LockManager/request'
+          )
 
-          return await fn();
+          return await fn()
         }
       }
     }
-  );
+  )
 }
 
 export async function lockNoOp<R>(
@@ -186,5 +183,5 @@ export async function lockNoOp<R>(
   acquireTimeout: number,
   fn: () => Promise<R>
 ): Promise<R> {
-  return await fn();
+  return await fn()
 }
