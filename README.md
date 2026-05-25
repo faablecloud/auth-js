@@ -196,8 +196,8 @@ export const auth = createClient({
 ```
 
 That's it. The adapter sets sensible defaults: `Path=/`, `SameSite=Lax`, auto
-`Secure` on HTTPS, and a 30-day `Max-Age` so users stay signed in across
-browser restarts.
+`Secure` on HTTPS, and a 30-day `Max-Age` so users stay signed in across browser
+restarts.
 
 Use `cookieOptions` only when you need to override something — e.g. share the
 session across subdomains:
