@@ -14,9 +14,7 @@ describe('redirect param naming', () => {
     const params = new URL(url).searchParams
 
     expect(params.get('client_id')).toBe('test-client')
-    expect(params.get('redirect_uri')).toBe(
-      'https://app.example.com/callback'
-    )
+    expect(params.get('redirect_uri')).toBe('https://app.example.com/callback')
   })
 
   it('redirectTo override takes precedence over redirectUri config', () => {
@@ -26,9 +24,7 @@ describe('redirect param naming', () => {
     })
     const params = new URL(url).searchParams
 
-    expect(params.get('redirect_uri')).toBe(
-      'https://app.example.com/other'
-    )
+    expect(params.get('redirect_uri')).toBe('https://app.example.com/other')
   })
 })
 

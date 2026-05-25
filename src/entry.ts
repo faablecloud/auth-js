@@ -7,17 +7,17 @@ import { createClient } from './createClient'
 import { AuthError } from './lib/errors'
 import { Session, User } from './lib/types'
 import type {
-  FaableAuthClientConfig,
-  SignInWithOAuthConnection,
-  AuthResponse,
   AuthChangeEvent,
-  Subscription,
-  SignOut,
-  SupportedStorage,
-  CookieOptions,
-  OAuthResponse,
   AuthFlowType,
-  Provider
+  AuthResponse,
+  CookieOptions,
+  FaableAuthClientConfig,
+  OAuthResponse,
+  Provider,
+  SignInWithOAuthConnection,
+  SignOut,
+  Subscription,
+  SupportedStorage
 } from './lib/types'
 
 export {
