@@ -299,12 +299,20 @@ export type FaableAuthClientConfig = {
   useRefreshTokens?: boolean
   /* If set to 'pkce' PKCE flow. Defaults to the 'implicit' flow otherwise */
   flowType?: AuthFlowType
-  storage?: SupportedStorage
+  /**
+   * Where to keep the session. Pass `'localStorage'` (default) or `'cookie'`
+   * for the bundled adapters, or any custom `SupportedStorage` implementation.
+   * The cookie adapter ships with sane defaults (`Path=/`, `SameSite=Lax`,
+   * auto `Secure` on HTTPS, 30-day `Max-Age`); use `cookieOptions` to override.
+   */
+  storage?: SupportedStorage | 'cookie' | 'localStorage'
   /* Optional key name used for storing tokens in local storage. */
   storageKey?: string
 
   /**
-   * (Optional) Options for the cookie storage.
+   * (Optional) Overrides for the cookie storage attributes. Setting this also
+   * implicitly switches to the cookie adapter, so passing `storage: 'cookie'`
+   * is not required when you only want to tweak attributes.
    */
   cookieOptions?: CookieOptions
 

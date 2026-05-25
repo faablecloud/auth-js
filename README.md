@@ -191,13 +191,23 @@ import { createClient } from '@faable/auth-js'
 export const auth = createClient({
   domain: '<faableauth_domain>',
   clientId: '<client_id>',
-  cookieOptions: {
-    domain: '.example.com',
-    path: '/',
-    sameSite: 'Lax',
-    secure: true,
-    maxAge: 60 * 60 * 24 * 7
-  }
+  storage: 'cookie'
+})
+```
+
+That's it. The adapter sets sensible defaults: `Path=/`, `SameSite=Lax`, auto
+`Secure` on HTTPS, and a 30-day `Max-Age` so users stay signed in across
+browser restarts.
+
+Use `cookieOptions` only when you need to override something — e.g. share the
+session across subdomains:
+
+```ts
+createClient({
+  domain: '<faableauth_domain>',
+  clientId: '<client_id>',
+  storage: 'cookie',
+  cookieOptions: { domain: '.example.com' }
 })
 ```
 

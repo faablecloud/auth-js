@@ -18,6 +18,9 @@ export interface CookieJar {
   cookie: string
 }
 
+/** Default cookie lifetime when the caller doesn't override `maxAge`. */
+const DEFAULT_COOKIE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+
 /**
  * A storage adapter that uses `document.cookie` to persist sessions. Useful
  * in SSR setups where the server reads the cookie on every request.
@@ -34,6 +37,7 @@ export const cookieStorageAdapter = (
     path: '/',
     sameSite: 'Lax',
     secure: isBrowser() && window.location.protocol === 'https:',
+    maxAge: DEFAULT_COOKIE_MAX_AGE_SECONDS,
     ...options
   }
 

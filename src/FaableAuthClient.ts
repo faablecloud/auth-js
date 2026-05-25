@@ -68,6 +68,17 @@ const AUTO_REFRESH_TICK_THRESHOLD = 3
 /** Hard upper bound for a single refresh-token call before it's aborted. */
 const REFRESH_TIMEOUT_MS = 30 * 1000
 
+const resolveStorage = (config: FaableAuthClientConfig): SupportedStorage => {
+  const { storage, cookieOptions } = config
+  if (storage === 'cookie' || cookieOptions) {
+    return cookieStorageAdapter(cookieOptions)
+  }
+  if (storage === 'localStorage' || storage === undefined) {
+    return localStorageAdapter
+  }
+  return storage
+}
+
 export class FaableAuthClient extends Base {
   domainUrl: string
   tokenIssuer: string
@@ -128,11 +139,7 @@ export class FaableAuthClient extends Base {
     const key_prefix = config?.storageKey || STORAGE_KEY
     this.storageKey = `${key_prefix}-${this.clientId}`
 
-    if (config?.cookieOptions) {
-      this.storage = cookieStorageAdapter(config.cookieOptions)
-    } else {
-      this.storage = config?.storage || localStorageAdapter
-    }
+    this.storage = resolveStorage(config)
 
     this.lock = new Lock({
       lock: config.lock,
