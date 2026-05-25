@@ -1,30 +1,28 @@
+import { STORAGE_KEY } from './constants'
 import { Session } from './types'
 
 /**
- * Helper for Next.js to get the session from the server-side cookies.
- * This can be used in API routes or Server Components.
+ * Helper for Next.js (and any other SSR runtime) to read the session from
+ * cookies on the server. Mirrors how the browser client builds the storage
+ * key, so the integrator only needs to pass their `clientId`.
+ *
+ * The first argument can be the result of `cookies()` from `next/headers`,
+ * or any plain object whose keys are cookie names.
  */
 export const getSessionFromCookies = (
   cookiesStore: any,
-  storageKey: string
+  options: { clientId: string; storageKey?: string }
 ): Session | null => {
-  // Try to get the session from the cookie
-  // cookiesStore can be the result of calling `cookies()` from `next/headers`
-  // or it could be a simple object mapping keys to values.
+  const key = `${options.storageKey ?? STORAGE_KEY}-${options.clientId}`
 
   let cookieValue: string | undefined
-
-  if (typeof cookiesStore.get === 'function') {
-    // Next.js cookies() API
-    cookieValue = cookiesStore.get(storageKey)?.value
+  if (typeof cookiesStore?.get === 'function') {
+    cookieValue = cookiesStore.get(key)?.value
   } else {
-    // Plain object
-    cookieValue = cookiesStore[storageKey]
+    cookieValue = cookiesStore?.[key]
   }
 
-  if (!cookieValue) {
-    return null
-  }
+  if (!cookieValue) return null
 
   try {
     return JSON.parse(decodeURIComponent(cookieValue))

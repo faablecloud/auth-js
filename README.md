@@ -235,18 +235,19 @@ the server:
 
 ```ts
 // app/page.tsx
-import { cookies } from "next/headers";
-import { getSessionFromCookies } from "@faable/auth-js";
+import { cookies } from 'next/headers'
+import { getSessionFromCookies } from '@faable/auth-js'
 
 export default async function Page() {
-  const session = getSessionFromCookies(cookies(), "faable.auth.token-<client_id>");
-  if (!session) return <SignIn />;
-  return <Dashboard user={session.user} />;
+  const session = getSessionFromCookies(cookies(), { clientId: '<client_id>' })
+  if (!session) return <SignIn />
+  return <Dashboard user={session.user} />
 }
 ```
 
-The storage key follows the pattern
-`${storageKey ?? "faable.auth.token"}-${clientId}`.
+Pass the same `clientId` you used in `createClient`. If you also passed a
+custom `storageKey` to `createClient`, mirror it here as `{ clientId,
+storageKey }` so the helper looks at the same cookie.
 
 ## License
 
