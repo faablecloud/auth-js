@@ -1,7 +1,12 @@
 name: Docs
 on:
-  push:
+  # Run after a release finishes so the published version is available and the
+  # generated docs header matches what's on npm. Also allow manual rebuilds.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
     branches: [main]
+  workflow_dispatch:
 permissions:
   contents: read
   pages: write
@@ -11,6 +16,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build-deploy:
+    # On workflow_run only deploy when the release succeeded; always run manual dispatch.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -21,6 +28,15 @@ jobs:
         with:
           node-version: "lts/*"
       - run: npm ci
+      - name: Set docs version from published release
+        run: |
+          VERSION=$(npm view @faable/auth-js version 2>/dev/null || true)
+          if [ -n "$VERSION" ]; then
+            npm pkg set version="$VERSION"
+            echo "Docs version set to $VERSION"
+          else
+            echo "Could not resolve published version; keeping package.json default"
+          fi
       - run: npm run docs
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
