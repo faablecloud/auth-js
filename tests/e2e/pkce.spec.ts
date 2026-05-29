@@ -73,9 +73,13 @@ test('configured audience reaches /authorize and the code-exchange POST', async 
     audience
   )
 
-  await page.waitForFunction(async () => await window.__faable.getSession(), null, {
-    timeout: 5_000
-  })
+  await page.waitForFunction(
+    async () => await window.__faable.getSession(),
+    null,
+    {
+      timeout: 5_000
+    }
+  )
 
   const serverState = await request.get('/__state').then(r => r.json())
   expect(serverState.audiences.authorize).toContain(audience)
