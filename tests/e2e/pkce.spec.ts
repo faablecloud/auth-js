@@ -44,6 +44,47 @@ test('PKCE flow exchanges the authorization code and persists a session', async 
   expect(new URL(page.url()).searchParams.has('code')).toBe(false)
 })
 
+test('configured audience reaches /authorize and the code-exchange POST', async ({
+  page,
+  request
+}) => {
+  const audience = 'https://api.example.com'
+
+  await page.goto('/')
+  await page.waitForFunction(() => typeof window.__faable !== 'undefined')
+  await page.evaluate(
+    aud => window.__faable.createClient({ audience: aud }),
+    audience
+  )
+
+  const authorizeUrl = await page.evaluate(async () => {
+    const { data } = await window.__client.signInWithOauthConnection({
+      connection: 'google',
+      skipBrowserRedirect: true
+    })
+    return data.url
+  })
+  expect(new URL(authorizeUrl).searchParams.get('audience')).toBe(audience)
+
+  await page.goto(authorizeUrl)
+  await page.waitForFunction(() => typeof window.__faable !== 'undefined')
+  await page.evaluate(
+    aud => window.__faable.createClient({ audience: aud }),
+    audience
+  )
+
+  await page.waitForFunction(async () => await window.__faable.getSession(), null, {
+    timeout: 5_000
+  })
+
+  const serverState = await request.get('/__state').then(r => r.json())
+  expect(serverState.audiences.authorize).toContain(audience)
+  const codeExchange = serverState.audiences.token.find(
+    (t: { grant_type: string }) => t.grant_type === 'authorization_code'
+  )
+  expect(codeExchange?.audience).toBe(audience)
+})
+
 test('an authorization code with no stored verifier is rejected', async ({
   page,
   request

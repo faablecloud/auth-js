@@ -84,6 +84,7 @@ export class FaableAuthClient extends Base {
   tokenIssuer: string
   redirectUri: string
   scope?: string
+  audience?: string
   sessionCheckExpiryDays: number
 
   protected initializePromise: Promise<InitializeResult> | null = null
@@ -116,6 +117,27 @@ export class FaableAuthClient extends Base {
 
   protected lock: Lock
 
+  /**
+   * Creates a new authentication client bound to a Faable Auth tenant.
+   *
+   * The constructor kicks off {@link FaableAuthClient.initialize} in the
+   * background; you do not need to await anything before calling other methods.
+   * Prefer the {@link createClient} factory in app code — it has the same
+   * effect with less ceremony.
+   *
+   * @param config Tenant settings. `domain` and `clientId` are required and
+   *   throw synchronously when missing.
+   * @example
+   * ```ts
+   * const auth = new FaableAuthClient({
+   *   domain: '<faableauth_domain>',
+   *   clientId: '<client_id>',
+   *   redirectUri: window.location.origin
+   * })
+   * ```
+   * @see {@link https://faable.com/docs/auth/get-started | Get Started with Faable Auth}
+   * @see {@link https://faable.com/docs/auth/clients | Clients}
+   */
   constructor(config: FaableAuthClientConfig) {
     const debug = config?.debug || false
     super({ debug })
@@ -132,6 +154,7 @@ export class FaableAuthClient extends Base {
       throw new Error('Missing clientId')
     }
     this.clientId = config.clientId
+    this.audience = config.audience
 
     this.api = new FaableAuthApi(this.domainUrl, { debug })
 
@@ -160,16 +183,37 @@ export class FaableAuthClient extends Base {
   }
 
   /**
-   * Returns the current session, if any.
+   * Cached session value last persisted by the client.
+   *
+   * This is a synchronous accessor that returns whatever the client has
+   * already loaded into memory. It can lag behind storage (for example,
+   * across tabs before the broadcast event arrives) and never triggers a
+   * refresh. Prefer {@link FaableAuthClient.getSession} when you need an
+   * authoritative value, especially on the server.
+   *
+   * @returns The cached {@link Session} or `null` if no user is signed in.
+   * @see {@link https://faable.com/docs/auth/oidc/userinfo | UserInfo}
    */
   get session() {
     return this._session
   }
 
   /**
-   * Initializes the client session either from the url or from storage.
-   * This method is automatically called when instantiating the client, but should also be called
-   * manually when checking for an error from an auth redirect (oauth, magiclink, password recovery, etc).
+   * Initializes the client session either from the URL or from storage.
+   *
+   * Automatically called once from the constructor and idempotent — extra
+   * calls return the same in-flight promise. Call it explicitly when you
+   * need to await an OAuth, magic link, or password-recovery redirect to
+   * finish processing so you can surface any returned error.
+   *
+   * @returns A promise that resolves to `{ error }` — non-null when the URL
+   *   carried a failure or storage was corrupt; never throws.
+   * @example
+   * ```ts
+   * const { error } = await auth.initialize()
+   * if (error) console.error('Auth redirect failed', error)
+   * ```
+   * @see {@link https://faable.com/docs/auth/oauth-flows/authorization-code | Authorization Code with PKCE}
    */
   async initialize(): Promise<InitializeResult> {
     if (this.initializePromise) {
@@ -391,7 +435,8 @@ export class FaableAuthClient extends Base {
         client_id: this.clientId,
         grant_type: 'authorization_code',
         code: authCode,
-        code_verifier: codeVerifier
+        code_verifier: codeVerifier,
+        ...(this.audience ? { audience: this.audience } : {})
       }
     )
 
@@ -619,7 +664,14 @@ export class FaableAuthClient extends Base {
    * platform's foreground indication mechanism and call these methods
    * appropriately to conserve resources.
    *
-   * {@see #stopAutoRefresh}
+   * @example
+   * ```ts
+   * // React Native / Node: drive the refresh loop on focus events yourself
+   * appState.addEventListener('change', state => {
+   *   if (state === 'active') auth.startAutoRefresh()
+   * })
+   * ```
+   * @see {@link https://faable.com/docs/auth/oauth-flows/refresh-token | Refresh Token}
    */
   async startAutoRefresh() {
     this._removeVisibilityChangedCallback()
@@ -772,6 +824,7 @@ export class FaableAuthClient extends Base {
       response_type?: 'code' | 'token'
       queryParams?: { [key: string]: string }
       skipBrowserRedirect?: boolean
+      audience?: string
     }
   ) {
     let urlParams: Record<string, any> = params.queryParams || {}
@@ -801,12 +854,38 @@ export class FaableAuthClient extends Base {
       authorize_params.connection = params.connection
     }
 
+    const audience = params.audience ?? this.audience
+    if (audience) {
+      authorize_params.audience = audience
+    }
+
     return `${url}?${new URLSearchParams({
       ...urlParams,
       ...authorize_params
     })}`
   }
 
+  /**
+   * Starts an OAuth / social login by redirecting the browser to the tenant's
+   * `/authorize` endpoint for the chosen connection.
+   *
+   * In browsers the SDK redirects the current window unless
+   * `skipBrowserRedirect` is `true`; the call resolves to the authorization
+   * URL so you can drive the navigation yourself. PKCE is used by default in
+   * browsers, falling back to the implicit flow elsewhere. Prefer
+   * `connection_id` when known — the backend resolves it without an extra
+   * lookup; `connection` (by name) is kept for legacy tenants.
+   *
+   * @example
+   * ```ts
+   * await auth.signInWithOauthConnection({
+   *   connection: 'google',
+   *   redirectTo: 'https://app.example.com/callback'
+   * })
+   * ```
+   * @see {@link https://faable.com/docs/auth/connections | Connections}
+   * @see {@link https://faable.com/docs/auth/oauth-flows/authorization-code | Authorization Code with PKCE}
+   */
   async signInWithOauthConnection(
     credentials: SignInWithOAuthConnection
   ): Promise<OAuthResponse> {
@@ -816,16 +895,41 @@ export class FaableAuthClient extends Base {
       redirectTo: credentials?.redirectTo,
       scopes: credentials?.scopes,
       queryParams: credentials.queryParams,
-      skipBrowserRedirect: credentials.skipBrowserRedirect
+      skipBrowserRedirect: credentials.skipBrowserRedirect,
+      audience: credentials.audience
     })
   }
 
+  /**
+   * Signs the user in with a username + password against a database
+   * connection on the tenant.
+   *
+   * The server responds with an HTML form that posts the user back to the
+   * tenant's `/login/callback` to complete the OAuth flow; the SDK
+   * auto-submits it from the current document. That is why the success path
+   * resolves to `{ data: null, error: null }` — the actual session lands on
+   * the redirect target, not on this return value. Subscribe with
+   * {@link FaableAuthClient.onAuthStateChange} to observe the resulting
+   * `SIGNED_IN` event.
+   *
+   * @example
+   * ```ts
+   * await auth.signInWithUsernamePassword({
+   *   username: 'user@example.com',
+   *   password: '••••••••',
+   *   redirectTo: 'https://app.example.com/callback'
+   * })
+   * ```
+   * @see {@link https://faable.com/docs/auth/connections | Connections}
+   */
   async signInWithUsernamePassword(data: {
     username: string
     password: string
     redirectTo?: string
     state?: string
+    audience?: string
   }): Promise<{ data: null; error: AuthError | null }> {
+    const audience = data.audience ?? this.audience
     const rawAuthResponse = await _post<string>(
       `${this.domainUrl}/usernamepassword/login`,
       {
@@ -834,7 +938,8 @@ export class FaableAuthClient extends Base {
         redirect_uri:
           data.redirectTo || this.redirectUri || window?.location.origin,
         client_id: this.clientId,
-        state: data.state
+        state: data.state,
+        ...(audience ? { audience } : {})
       },
       { raw: true }
     )
@@ -853,20 +958,36 @@ export class FaableAuthClient extends Base {
   }
 
   /**
-   * Completes a passwordless login using an OTP code.
-   * @param data The username and OTP code.
+   * Completes a passwordless login by exchanging an OTP code for a session.
+   *
+   * Pair this with {@link FaableAuthClient.signInWithPasswordless} called
+   * with `type: 'code'`. On success the new session is persisted to storage
+   * and a `SIGNED_IN` event is broadcast.
+   *
+   * @param data The user identifier and the OTP code they received.
+   * @example
+   * ```ts
+   * const { data, error } = await auth.signInWithOtp({
+   *   username: 'user@example.com',
+   *   otp: '123456'
+   * })
+   * ```
+   * @see {@link https://faable.com/docs/auth/passwordless | Passwordless Authentication}
    */
   async signInWithOtp(data: {
     username: string
     otp: string
+    audience?: string
   }): Promise<AuthResponse> {
+    const audience = data.audience ?? this.audience
     const rawResponse = await _post<Partial<RawAuthResponse>>(
       `${this.domainUrl}/oauth/token`,
       {
         client_id: this.clientId,
         grant_type: 'http://auth0.com/oauth/grant-type/passwordless/otp',
         username: data.username,
-        otp: data.otp
+        otp: data.otp,
+        ...(audience ? { audience } : {})
       }
     )
 
@@ -907,22 +1028,55 @@ export class FaableAuthClient extends Base {
   }
 
   /**
-   * Starts a passwordless login flow by requesting an OTP code or a magic link.
-   * @param data The email and the type of delivery (code or link).
+   * Starts a passwordless login flow by emailing the user either an OTP code
+   * or a magic link.
+   *
+   * - `type: 'code'` sends a short code the user pastes into your UI; finish
+   *   the flow with {@link FaableAuthClient.signInWithOtp}.
+   * - `type: 'link'` sends a clickable link that lands on your `redirectUri`
+   *   with the tokens already attached, processed by
+   *   {@link FaableAuthClient.initialize} on page load.
+   *
+   * @param data The user's email and the delivery mechanism.
+   * @example
+   * ```ts
+   * await auth.signInWithPasswordless({
+   *   email: 'user@example.com',
+   *   type: 'code'
+   * })
+   * ```
+   * @see {@link https://faable.com/docs/auth/passwordless | Passwordless Authentication}
    */
   async signInWithPasswordless(data: {
     email: string
     type: 'code' | 'link'
+    audience?: string
   }): Promise<{ data: any; error: AuthError | null }> {
+    const audience = data.audience ?? this.audience
     const response = await _post(`${this.domainUrl}/passwordless/start`, {
       client_id: this.clientId,
       email: data.email,
-      send: data.type
+      send: data.type,
+      ...(audience ? { audience } : {})
     })
 
     return { data: response.data, error: response.error }
   }
 
+  /**
+   * Triggers a "change your password" email for a database-connection user.
+   *
+   * The current session is unaffected — the user clicks the link in the
+   * email and completes the reset on the tenant's hosted pages. The promise
+   * resolves once the email has been queued.
+   *
+   * @param params The user's email address.
+   * @example
+   * ```ts
+   * await auth.changePassword({ email: 'user@example.com' })
+   * ```
+   * @see {@link https://faable.com/docs/auth/connections | Connections}
+   */
   async changePassword(params: {
     email: string
   }): Promise<{ data: unknown; error: AuthError | null }> {
@@ -943,6 +1097,28 @@ export class FaableAuthClient extends Base {
     }
   }
 
+  /**
+   * Builds the tenant's `/authorize` URL without redirecting the browser.
+   *
+   * Useful when you need to render a login link, open the page in a popup,
+   * or hand the URL to a different runtime (e.g. a webview). For the
+   * everyday "click → redirect" flow use {@link FaableAuthClient.authorize}
+   * or {@link FaableAuthClient.signInWithOauthConnection}.
+   *
+   * The redirect target is resolved with this precedence:
+   * `options.redirectTo` → `config.redirectUri` → `window.location.origin`.
+   *
+   * @returns The fully-qualified authorize URL.
+   * @example
+   * ```ts
+   * const url = auth.buildAuthorizeUrl({
+   *   connection: 'google',
+   *   redirectTo: 'https://app.example.com/callback'
+   * })
+   * window.open(url, 'login', 'popup')
+   * ```
+   * @see {@link https://faable.com/docs/auth/oauth-flows/authorization-code | Authorization Code with PKCE}
+   */
   buildAuthorizeUrl(
     options: {
       connection?: string
@@ -957,7 +1133,7 @@ export class FaableAuthClient extends Base {
       redirect_uri:
         options.redirectTo || this.redirectUri || window?.location.origin,
       response_type: resolveResponseType(options, isBrowser()),
-      audience: options.audience,
+      audience: options.audience ?? this.audience,
       scope: options.scope,
       connection: options.connection
     }
@@ -969,6 +1145,22 @@ export class FaableAuthClient extends Base {
     return `${this.domainUrl}/authorize?${new URLSearchParams(definedParams).toString()}`
   }
 
+  /**
+   * Redirects the current window to the tenant's `/authorize` endpoint.
+   *
+   * Fire-and-forget: there is no return value because the browser navigates
+   * away. The session lands back on your `redirectUri`, where
+   * {@link FaableAuthClient.initialize} consumes it on the next page load.
+   *
+   * @example
+   * ```ts
+   * auth.authorize({
+   *   response_type: 'code',
+   *   redirectTo: 'https://app.example.com/callback'
+   * })
+   * ```
+   * @see {@link https://faable.com/docs/auth/oauth-flows/authorization-code | Authorization Code with PKCE}
+   */
   authorize(options: {
     redirectTo?: string
     scope?: string
@@ -986,6 +1178,7 @@ export class FaableAuthClient extends Base {
     scopes?: string
     queryParams?: { [key: string]: string }
     skipBrowserRedirect?: boolean
+    audience?: string
   }) {
     const url: string = await this._getUrlForConnection(
       `${this.domainUrl}/authorize`,
@@ -995,7 +1188,8 @@ export class FaableAuthClient extends Base {
         connection_id: options.connection_id,
         redirectTo: options.redirectTo,
         scopes: options.scopes,
-        queryParams: options.queryParams
+        queryParams: options.queryParams,
+        audience: options.audience
       }
     )
 
@@ -1010,9 +1204,21 @@ export class FaableAuthClient extends Base {
   }
 
   /**
-   * Sets the session data from the current session. If the current session is expired, setSession will take care of refreshing it to obtain a new session.
-   * If the refresh token or access token in the current session is invalid, an error will be thrown.
-   * @param currentSession The current session that minimally contains an access token and refresh token.
+   * Adopts an externally-provided session into the client.
+   *
+   * Decodes the access token to find its expiry; refreshes immediately when
+   * already expired, otherwise fetches the user info to round-trip the
+   * session. Persists the result and broadcasts `SIGNED_IN`. An invalid
+   * refresh or access token surfaces as `error` on the returned object.
+   *
+   * @param currentSession Minimal session shape — an access token and a
+   *   refresh token. Other fields are recomputed.
+   * @example
+   * ```ts
+   * // After receiving tokens from a custom server-side handoff
+   * await auth.setSession({ access_token, refresh_token })
+   * ```
+   * @see {@link https://faable.com/docs/auth/oidc/userinfo | UserInfo}
    */
   async setSession(currentSession: {
     access_token: string
@@ -1028,13 +1234,23 @@ export class FaableAuthClient extends Base {
   /**
    * Returns the session, refreshing it if necessary.
    *
-   * The session returned can be null if the session is not detected which can happen in the event a user is not signed-in or has logged out.
+   * The session returned can be `null` if no user is signed in or the last
+   * one has logged out.
    *
-   * **IMPORTANT:** This method loads values directly from the storage attached
-   * to the client. If that storage is based on request cookies for example,
-   * the values in it may not be authentic and therefore it's strongly advised
-   * against using this method and its results in such circumstances. A warning
-   * will be emitted if this is detected. Use {@link #getUser()} instead.
+   * **IMPORTANT:** This method loads values directly from the storage
+   * attached to the client. If that storage is based on request cookies (for
+   * example, on the server) the values in it may not be authentic and
+   * therefore it's strongly advised against using this method and its
+   * results in such circumstances — a warning will be emitted when the
+   * storage exposes `isServer: true`. Re-fetch the user with a verified
+   * call (or verify the access token yourself) before trusting it.
+   *
+   * @example
+   * ```ts
+   * const { data, error } = await auth.getSession()
+   * if (data.session) console.log(data.session.user)
+   * ```
+   * @see {@link https://faable.com/docs/auth/oidc/userinfo | UserInfo}
    */
   async getSession() {
     await this.initializePromise
@@ -1363,7 +1579,8 @@ export class FaableAuthClient extends Base {
             {
               client_id: this.clientId,
               grant_type: 'refresh_token',
-              refresh_token: refreshToken
+              refresh_token: refreshToken,
+              ...(this.audience ? { audience: this.audience } : {})
             }
           )
           if (rawResponse.error) {
@@ -1439,12 +1656,25 @@ export class FaableAuthClient extends Base {
   }
 
   /**
-   * Inside a browser context, `signOut()` will remove the logged in user from the browser session and log them out - removing all items from localstorage and then trigger a `"SIGNED_OUT"` event.
+   * Signs the user out and clears the session from storage.
    *
-   * For server-side management, you can revoke all refresh tokens for a user by passing a user's JWT through to `auth.api.signOut(JWT: string)`.
-   * There is no way to revoke a user's access token jwt until it expires. It is recommended to set a shorter expiry on the jwt for this reason.
+   * In a browser context this removes the persisted session and broadcasts a
+   * `SIGNED_OUT` event to every tab listening on the same `storageKey`. The
+   * access token JWT itself remains valid until its `exp` — keep that
+   * expiry short.
    *
-   * If using `others` scope, no `SIGNED_OUT` event is fired!
+   * Scopes:
+   * - `'global'` (default) — invalidate all refresh tokens for the user
+   * - `'local'` — only clear this client's storage
+   * - `'others'` — invalidate every refresh token except this device's; no
+   *   `SIGNED_OUT` event is fired locally
+   *
+   * @example
+   * ```ts
+   * await auth.signOut() // global — all sessions for this user
+   * await auth.signOut({ scope: 'local' }) // only this device
+   * ```
+   * @see {@link https://faable.com/docs/auth/oidc/logout | Logout}
    */
   async signOut(
     options: SignOut = { scope: 'global' }
@@ -1492,8 +1722,28 @@ export class FaableAuthClient extends Base {
   }
 
   /**
-   * Receive a notification every time an auth event happens.
-   * @param callback A callback function to be invoked when an auth event happens.
+   * Subscribes to auth-state changes for this client.
+   *
+   * The callback fires for `INITIAL_SESSION` once shortly after subscribing
+   * (so consumers don't have to special-case "no event yet"), and then for
+   * every `SIGNED_IN`, `SIGNED_OUT`, `TOKEN_REFRESHED`, `PASSWORD_RECOVERY`,
+   * and `USER_UPDATED` event. Events are broadcast across tabs through
+   * `BroadcastChannel`, so a sign-in or sign-out in one tab reaches every
+   * other tab using the same `storageKey`.
+   *
+   * @param callback Invoked with the event name and the new session (or
+   *   `null` on `SIGNED_OUT`). Can return a promise — the SDK awaits it.
+   * @returns `{ data: { subscription } }` — call `subscription.unsubscribe()`
+   *   to stop listening.
+   * @example
+   * ```ts
+   * const { data: { subscription } } = auth.onAuthStateChange((event, session) => {
+   *   if (event === 'SIGNED_IN') console.log('Welcome', session?.user.email)
+   * })
+   * // later
+   * subscription.unsubscribe()
+   * ```
+   * @see {@link https://faable.com/docs/auth/get-started | Get Started with Faable Auth}
    */
   onAuthStateChange(
     callback: (
@@ -1551,10 +1801,21 @@ export class FaableAuthClient extends Base {
   }
 
   /**
-   * Returns a new session, regardless of expiry status.
-   * Takes in an optional current session. If not passed in, then refreshSession() will attempt to retrieve it from getSession().
-   * If the current session's refresh token is invalid, an error will be thrown.
-   * @param currentSession The current session. If passed in, it must contain a refresh token.
+   * Forces a new session by exchanging a refresh token regardless of expiry.
+   *
+   * Normally the SDK handles refresh transparently via the auto-refresh
+   * ticker; call this only when you need to force an immediate refresh —
+   * e.g. right after a server-side action that changed the user's claims.
+   * Omit `currentSession` to reuse whatever {@link FaableAuthClient.getSession}
+   * returns.
+   *
+   * @param currentSession Optional session shape carrying the refresh token
+   *   to exchange. When passed it must include `refresh_token`.
+   * @example
+   * ```ts
+   * const { data, error } = await auth.refreshSession()
+   * ```
+   * @see {@link https://faable.com/docs/auth/oauth-flows/refresh-token | Refresh Token}
    */
   async refreshSession(currentSession?: {
     refresh_token: string

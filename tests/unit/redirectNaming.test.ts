@@ -66,3 +66,64 @@ describe('OAuth connection params', () => {
     expect(params.get('connection')).toBeNull()
   })
 })
+
+describe('audience parameter', () => {
+  it('omits audience when neither config nor per-call value is set', async () => {
+    const auth = createClient(baseConfig)
+
+    const authorizeUrl = auth.buildAuthorizeUrl()
+    expect(new URL(authorizeUrl).searchParams.get('audience')).toBeNull()
+
+    const { data } = await auth.signInWithOauthConnection({
+      connection: 'google',
+      skipBrowserRedirect: true
+    })
+    expect(new URL(data!.url!).searchParams.get('audience')).toBeNull()
+  })
+
+  it('emits config audience on buildAuthorizeUrl and OAuth connection URLs', async () => {
+    const auth = createClient({
+      ...baseConfig,
+      audience: 'https://api.example.com'
+    })
+
+    const authorizeUrl = auth.buildAuthorizeUrl()
+    expect(new URL(authorizeUrl).searchParams.get('audience')).toBe(
+      'https://api.example.com'
+    )
+
+    const { data } = await auth.signInWithOauthConnection({
+      connection: 'google',
+      skipBrowserRedirect: true
+    })
+    expect(new URL(data!.url!).searchParams.get('audience')).toBe(
+      'https://api.example.com'
+    )
+  })
+
+  it('per-call audience on buildAuthorizeUrl overrides config default', () => {
+    const auth = createClient({
+      ...baseConfig,
+      audience: 'https://api.example.com'
+    })
+    const url = auth.buildAuthorizeUrl({ audience: 'https://api.other.com' })
+    expect(new URL(url).searchParams.get('audience')).toBe(
+      'https://api.other.com'
+    )
+  })
+
+  it('per-call audience on signInWithOauthConnection overrides config default', async () => {
+    const auth = createClient({
+      ...baseConfig,
+      audience: 'https://api.example.com'
+    })
+    const { data } = await auth.signInWithOauthConnection({
+      connection: 'google',
+      audience: 'https://api.other.com',
+      skipBrowserRedirect: true
+    })
+    expect(new URL(data!.url!).searchParams.get('audience')).toBe(
+      'https://api.other.com'
+    )
+  })
+})

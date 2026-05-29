@@ -70,17 +70,35 @@ export const readChunkedCookieValue = (
 }
 
 /**
- * A storage adapter that uses `document.cookie` to persist sessions. Useful
- * in SSR setups where the server reads the cookie on every request.
+ * Storage adapter that persists the session in `document.cookie`.
  *
- * Values exceeding `MAX_CHUNK_SIZE` are transparently split across numbered
- * cookies (`<key>.0`, `<key>.1`, …) so a full session — which easily exceeds
- * the 4 KB per-cookie browser limit once tokens, id_token and user metadata
- * are encoded — round-trips without being silently dropped by the browser.
+ * Pick this adapter when you need SSR (server reads the cookie on every
+ * request) or want to scope storage with `Secure`, `SameSite`, or `Domain`.
+ * The simplest way to enable it is `createClient({ storage: 'cookie' })` or
+ * by passing `cookieOptions` — the SDK calls this factory internally.
  *
- * The optional `jar` parameter lets tests inject a fake document; production
- * code passes nothing and the adapter uses the real `document` in browsers
- * (and no-ops on the server).
+ * Defaults applied to every cookie: `Path=/`, `SameSite=Lax`, `Secure` on
+ * HTTPS, 30-day `Max-Age`. Override any of them through `options`. Values
+ * larger than the per-cookie browser limit (~4 KB) are transparently split
+ * across numbered chunks (`<key>.0`, `<key>.1`, …) and re-assembled on read.
+ *
+ * @param options Attribute overrides for every written cookie.
+ * @param jar Document-like object whose `cookie` property is read/written.
+ *   Defaults to `document` in browsers and `null` (no-op) on the server —
+ *   only override for tests.
+ * @returns A {@link SupportedStorage} ready to pass to {@link createClient}.
+ * @example
+ * ```ts
+ * import { createClient } from '@faable/auth-js'
+ *
+ * export const auth = createClient({
+ *   domain: '<faableauth_domain>',
+ *   clientId: '<client_id>',
+ *   storage: 'cookie',
+ *   cookieOptions: { domain: '.example.com' }
+ * })
+ * ```
+ * @see {@link https://faable.com/docs/auth/quickstart/nextjs | Next.js Quickstart}
  */
 export const cookieStorageAdapter = (
   options: CookieOptions = {},

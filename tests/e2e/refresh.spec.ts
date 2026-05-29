@@ -54,6 +54,40 @@ test('refreshSession with a revoked refresh_token signs the user out', async ({
   expect(session).toBeNull()
 })
 
+test('refresh POST forwards the configured audience to /oauth/token', async ({
+  page,
+  request
+}) => {
+  const audience = 'https://api.example.com'
+  await request.post('/__reset')
+  await request.post('/__seed/otp', {
+    data: { username: 'user@example.com', otp: '123456' }
+  })
+  await page.goto('/')
+  await page.waitForFunction(() => typeof window.__faable !== 'undefined')
+  await page.evaluate(
+    aud => window.__faable.createClient({ audience: aud }),
+    audience
+  )
+  await page.evaluate(() =>
+    window.__client.signInWithOtp({
+      username: 'user@example.com',
+      otp: '123456'
+    })
+  )
+
+  const refreshResult = await page.evaluate(() =>
+    window.__faable.refreshSession()
+  )
+  expect(refreshResult.error).toBeNull()
+
+  const serverState = await request.get('/__state').then(r => r.json())
+  const refreshCall = serverState.audiences.token.find(
+    (t: { grant_type: string }) => t.grant_type === 'refresh_token'
+  )
+  expect(refreshCall?.audience).toBe(audience)
+})
+
 test('a session loaded from storage with an expired access_token gets refreshed transparently', async ({
   page,
   request

@@ -12,6 +12,15 @@ export interface AuthenticationResult {
   error_description?: string
 }
 
+/**
+ * OpenID Connect–style user profile returned by the tenant's userinfo
+ * endpoint.
+ *
+ * Standard OIDC claims are typed explicitly; provider-specific or custom
+ * claims (e.g. `org_id`, `roles`) surface through the index signature.
+ *
+ * @see {@link https://faable.com/docs/auth/oidc/userinfo | UserInfo}
+ */
 export class User {
   name?: string
   profile?: string
@@ -263,41 +272,59 @@ export type TokenEndpointResponse = {
   scope?: string
 }
 
+/**
+ * Attribute overrides for the bundled cookie storage adapter.
+ *
+ * Defaults: `Path=/`, `SameSite=Lax`, `Secure` on HTTPS, `Max-Age` 30 days.
+ * Use this to share the session across subdomains or tighten `SameSite`.
+ *
+ * @see {@link https://faable.com/docs/auth/quickstart/nextjs | Next.js Quickstart}
+ */
 export interface CookieOptions {
-  /**
-   * (Optional) The domain of the cookie.
-   */
+  /** (Optional) The domain of the cookie. Use a leading dot to share across subdomains, e.g. `.example.com`. */
   domain?: string
-  /**
-   * (Optional) The path of the cookie.
-   */
+  /** (Optional) The path of the cookie. Defaults to `/`. */
   path?: string
-  /**
-   * (Optional) The same-site attribute of the cookie.
-   */
+  /** (Optional) The same-site attribute of the cookie. Defaults to `'Lax'`. */
   sameSite?: 'Lax' | 'Strict' | 'None'
-  /**
-   * (Optional) Whether the cookie should only be sent over HTTPS.
-   */
+  /** (Optional) Whether the cookie should only be sent over HTTPS. Defaults to `true` when the current page is HTTPS. */
   secure?: boolean
-  /**
-   * (Optional) The maximum age of the cookie in seconds.
-   */
+  /** (Optional) The maximum age of the cookie in seconds. Defaults to 30 days. */
   maxAge?: number
 }
 
+/**
+ * Configuration accepted by {@link createClient} and the
+ * `FaableAuthClient` constructor.
+ *
+ * `domain` and `clientId` are the only required fields. Everything else has
+ * sensible defaults — see the individual properties for the specifics.
+ *
+ * @see {@link https://faable.com/docs/auth/get-started | Get Started with Faable Auth}
+ * @see {@link https://faable.com/docs/auth/clients | Clients}
+ */
 export type FaableAuthClientConfig = {
+  /** **Required.** Your Faable Auth tenant domain. */
   domain: string
+  /** **Required.** Application client ID from the dashboard. */
   clientId: string
 
   // Optional
+  /** Space-separated scopes. Defaults to `openid profile email`. */
   scope?: string
+  /**
+   * Default API audience the access tokens issued for this client should be
+   * bound to. Forwarded to `/authorize` and to the `/oauth/token` POST bodies
+   * (code exchange, refresh, OTP). `signInWith*` methods accept an `audience`
+   * argument to override it per call.
+   */
   audience?: string
+  /** Default callback URL. Falls back to `window.location.origin`. */
   redirectUri?: string
   authorizationParams?: AuthorizationParams
   cookieDomain?: string
   useRefreshTokens?: boolean
-  /* If set to 'pkce' PKCE flow. Defaults to the 'implicit' flow otherwise */
+  /** OAuth flow used when initiating sign-in. Defaults to `'pkce'` in browsers and `'implicit'` elsewhere. */
   flowType?: AuthFlowType
   /**
    * Where to keep the session. Pass `'localStorage'` (default) or `'cookie'`
@@ -306,7 +333,7 @@ export type FaableAuthClientConfig = {
    * auto `Secure` on HTTPS, 30-day `Max-Age`); use `cookieOptions` to override.
    */
   storage?: SupportedStorage | 'cookie' | 'localStorage'
-  /* Optional key name used for storing tokens in local storage. */
+  /** Optional prefix for the storage key. Final key is `${storageKey}-${clientId}`. */
   storageKey?: string
 
   /**
@@ -332,23 +359,56 @@ type PromisifyMethods<T> = {
     : T[K]
 }
 
+/**
+ * Minimal storage contract the SDK relies on. Compatible with `localStorage`,
+ * `sessionStorage`, the bundled cookie adapter, and any custom adapter you
+ * provide. Methods may return synchronously or asynchronously.
+ *
+ * @example
+ * ```ts
+ * const memoryStorage: SupportedStorage = {
+ *   store: new Map<string, string>(),
+ *   getItem: k => memoryStorage.store.get(k) ?? null,
+ *   setItem: (k, v) => void memoryStorage.store.set(k, v),
+ *   removeItem: k => void memoryStorage.store.delete(k)
+ * }
+ * ```
+ */
 export type SupportedStorage = PromisifyMethods<
   Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 > & {
   /**
-   * If set to `true` signals to the library that the storage medium is used
-   * on a server and the values may not be authentic, such as reading from
-   * request cookies. Implementations should not set this to true if the client
-   * is used on a server that reads storage information from authenticated
-   * sources, such as a secure database or file.
+   * Set to `true` when the storage medium reads from an untrusted source
+   * (e.g. request cookies on the server). Triggers a warning when consumers
+   * access `session.user` so they refresh against a verified source instead.
    */
   isServer?: boolean
 }
 
+/**
+ * Built-in social OAuth providers. Custom enterprise / SAML / OIDC
+ * connections are addressed by their `connection` name or `connection_id`.
+ *
+ * @see {@link https://faable.com/docs/auth/connections | Connections}
+ */
 export type Provider = 'google' | 'github'
 
+/**
+ * OAuth initiation flow.
+ *
+ * - `'pkce'` — recommended for SPAs / public clients; the SDK stores a code
+ *   verifier and exchanges the auth code for a session on the callback.
+ * - `'implicit'` — tokens are returned directly in the URL fragment.
+ *
+ * @see {@link https://faable.com/docs/auth/oauth-flows/authorization-code | Authorization Code with PKCE}
+ */
 export type AuthFlowType = 'implicit' | 'pkce'
 
+/**
+ * Options accepted by {@link FaableAuthClient.signInWithOauthConnection}.
+ *
+ * @see {@link https://faable.com/docs/auth/connections | Connections}
+ */
 export type SignInWithOAuthConnection = {
   /**
    * Identifier of the connection to use. Preferred over `connection` when
@@ -366,8 +426,18 @@ export type SignInWithOAuthConnection = {
   queryParams?: { [key: string]: string }
   /** If set to true does not immediately redirect the current browser context to visit the OAuth authorization page for the provider. */
   skipBrowserRedirect?: boolean
+  /**
+   * Override the API audience the issued access token should be bound to.
+   * Falls back to `FaableAuthClientConfig.audience` when omitted.
+   */
+  audience?: string
 }
 
+/**
+ * Result of {@link FaableAuthClient.signInWithOauthConnection}. Carries the
+ * authorize URL on success (useful when `skipBrowserRedirect: true` so you
+ * can drive the navigation yourself) or an {@link AuthError} on failure.
+ */
 export type OAuthResponse =
   | {
       data: {
@@ -382,6 +452,14 @@ export type OAuthResponse =
       error: AuthError
     }
 
+/**
+ * A signed-in session as persisted by the client.
+ *
+ * Use {@link FaableAuthClient.getSession} to obtain the current value; the
+ * SDK refreshes it automatically before `expires_at`.
+ *
+ * @see {@link https://faable.com/docs/auth/oidc/userinfo | UserInfo}
+ */
 export interface Session {
   /**
    * The oauth provider token. If present, this can be used to make external API requests to the oauth provider used.
@@ -412,6 +490,10 @@ export interface Session {
   user: User
 }
 
+/**
+ * Discriminated union returned by every sign-in / set-session / refresh
+ * method. Always check `error` first — `data` fields are `null` on failure.
+ */
 export type AuthResponse =
   | {
       data: {
@@ -430,6 +512,19 @@ export type AuthResponse =
 
 export type AuthChangeEventMFA = 'MFA_CHALLENGE_VERIFIED'
 
+/**
+ * Event names delivered to {@link FaableAuthClient.onAuthStateChange}
+ * callbacks.
+ *
+ * - `INITIAL_SESSION` — fired once on subscribe with the currently-loaded session
+ * - `SIGNED_IN` — a session was newly stored or adopted
+ * - `SIGNED_OUT` — the session was cleared (locally or via global sign-out)
+ * - `TOKEN_REFRESHED` — the SDK refreshed the access token in the background
+ * - `PASSWORD_RECOVERY` — the user landed back from a password-reset link
+ * - `USER_UPDATED` — the user object was reloaded from `/me`
+ *
+ * @see {@link https://faable.com/docs/auth/get-started | Get Started with Faable Auth}
+ */
 export type AuthChangeEvent =
   | 'INITIAL_SESSION'
   | 'PASSWORD_RECOVERY'
@@ -439,31 +534,34 @@ export type AuthChangeEvent =
   | 'USER_UPDATED'
   | AuthChangeEventMFA
 
+/**
+ * Handle returned by {@link FaableAuthClient.onAuthStateChange}.
+ *
+ * Call `unsubscribe()` to stop receiving events — for example, in a React
+ * `useEffect` cleanup.
+ */
 export interface Subscription {
-  /**
-   * The subscriber UUID. This will be set by the client.
-   */
+  /** Subscriber UUID assigned by the client. */
   id: string
-  /**
-   * The function to call every time there is an event. eg: (eventName) => {}
-   */
+  /** Invoked every time an auth event happens. */
   callback: (event: AuthChangeEvent, session: Session | null) => void
-  /**
-   * Call this to remove the listener.
-   */
+  /** Call to remove the listener. */
   unsubscribe: () => void
 }
 
+/**
+ * Options accepted by {@link FaableAuthClient.signOut}.
+ *
+ * @see {@link https://faable.com/docs/auth/oidc/logout | Logout}
+ */
 export type SignOut = {
   /**
-   * Determines which sessions should be
-   * logged out. Global means all
-   * sessions by this account. Local
-   * means only this session. Others
-   * means all other sessions except the
-   * current one. When using others,
-   * there is no sign-out event fired on
-   * the current session!
+   * Which sessions to log out.
+   *
+   * - `'global'` — every refresh token for the user (default)
+   * - `'local'` — only this client's storage
+   * - `'others'` — every other session except this device's; no
+   *   `SIGNED_OUT` event is fired locally
    */
   scope?: 'global' | 'local' | 'others'
 }

@@ -2,13 +2,37 @@ import { STORAGE_KEY } from './constants'
 import { Session } from './types'
 
 /**
- * Helper for Next.js (and any other SSR runtime) to read the session from
- * cookies on the server. Mirrors how the browser client builds the storage
- * key and reassembles chunked cookies written by `cookieStorageAdapter`,
- * so the integrator only needs to pass their `clientId`.
+ * Reads the persisted session from cookies on the server.
  *
- * The first argument can be the result of `cookies()` from `next/headers`,
- * or any plain object whose keys are cookie names.
+ * Pair this with the cookie storage adapter on the client: when the browser
+ * stores its session under the cookie shared with the server, the same
+ * `clientId` lets the server reconstruct it. Mirrors how the browser
+ * adapter builds the storage key and reassembles chunked cookies, so no
+ * extra wiring is required.
+ *
+ * @param cookiesStore Either the result of `cookies()` from `next/headers`,
+ *   or any plain `{ name: value }` map. Adapters with a `get(name)` method
+ *   are detected automatically.
+ * @param options `{ clientId, storageKey? }`. `storageKey` defaults to the
+ *   library's built-in prefix — only set it when you customized
+ *   `storageKey` in `createClient`.
+ * @returns The decoded {@link Session} or `null` when the cookie is absent
+ *   or malformed.
+ * @example
+ * ```ts
+ * // app/page.tsx
+ * import { cookies } from 'next/headers'
+ * import { getSessionFromCookies } from '@faable/auth-js'
+ *
+ * export default async function Page() {
+ *   const session = getSessionFromCookies(cookies(), {
+ *     clientId: '<client_id>'
+ *   })
+ *   if (!session) return <SignIn />
+ *   return <Dashboard user={session.user} />
+ * }
+ * ```
+ * @see {@link https://faable.com/docs/auth/quickstart/nextjs | Next.js Quickstart}
  */
 export const getSessionFromCookies = (
   cookiesStore: any,

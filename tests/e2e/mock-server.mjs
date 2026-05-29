@@ -19,7 +19,8 @@ function freshState() {
     pkce: new Map(), // code -> { code_challenge }
     sessions: new Map(), // access_token -> user
     refreshables: new Map(), // refresh_token -> user
-    otps: new Map() // username -> otp
+    otps: new Map(), // username -> otp
+    audiences: { authorize: [], token: [] } // audience values seen per endpoint
   }
 }
 
@@ -80,7 +81,8 @@ export function createMockServer() {
       pkce: [...state.pkce.entries()],
       sessions: [...state.sessions.keys()],
       refreshables: [...state.refreshables.keys()],
-      otps: [...state.otps.entries()]
+      otps: [...state.otps.entries()],
+      audiences: state.audiences
     })
   })
 
@@ -91,9 +93,11 @@ export function createMockServer() {
       redirect_uri,
       code_challenge,
       response_type,
-      state: oauthState
+      state: oauthState,
+      audience
     } = req.query
     if (!redirect_uri) return res.status(400).send('Missing redirect_uri')
+    state.audiences.authorize.push(audience ?? null)
     if (response_type === 'code') {
       const code = randomString('code_')
       if (code_challenge) state.pkce.set(code, { code_challenge })
@@ -117,8 +121,16 @@ export function createMockServer() {
   })
 
   app.post('/oauth/token', (req, res) => {
-    const { grant_type, code, code_verifier, refresh_token, username, otp } =
-      req.body
+    const {
+      grant_type,
+      code,
+      code_verifier,
+      refresh_token,
+      username,
+      otp,
+      audience
+    } = req.body
+    state.audiences.token.push({ grant_type, audience: audience ?? null })
 
     if (grant_type === 'authorization_code') {
       const stored = state.pkce.get(code)
