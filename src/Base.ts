@@ -10,6 +10,7 @@ export abstract class Base extends BaseLog {
     Base.nextInstanceID += 1
   }
 
+  /** @hidden */
   extraPrint() {
     return this.instanceID.toString()
   }

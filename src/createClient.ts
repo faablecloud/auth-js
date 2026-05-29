@@ -21,6 +21,7 @@ import { FaableAuthClientConfig } from './lib/types'
  * ```
  * @see {@link https://faable.com/docs/auth/get-started | Get Started with Faable Auth}
  * @see {@link https://faable.com/docs/auth/clients | Clients}
+ * @category Getting started
  */
 export const createClient = (config: FaableAuthClientConfig) => {
   return new FaableAuthClient(config)

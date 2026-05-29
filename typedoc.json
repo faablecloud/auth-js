@@ -10,6 +10,20 @@
   "excludePrivate": true,
   "excludeProtected": true,
   "categorizeByGroup": true,
+  "categoryOrder": [
+    "Getting started",
+    "Sign in",
+    "Authorize URLs",
+    "Sessions",
+    "Account",
+    "Sign out",
+    "Lifecycle",
+    "*"
+  ],
+  "navigation": {
+    "includeCategories": true,
+    "includeGroups": true
+  },
   "intentionallyNotExported": [
     "AuthChangeEventMFA",
     "BaseLogOptions",

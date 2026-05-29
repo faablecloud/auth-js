@@ -79,6 +79,20 @@ const resolveStorage = (config: FaableAuthClientConfig): SupportedStorage => {
   return storage
 }
 
+/**
+ * The main entry point of the SDK: an isomorphic client bound to a Faable
+ * Auth tenant that drives every authentication flow.
+ *
+ * Prefer creating it through the {@link createClient} factory in app code.
+ * Once instantiated it begins loading its session in the background, so you
+ * can subscribe to {@link FaableAuthClient.onAuthStateChange | auth-state
+ * changes} and trigger sign-ins right away. The most common starting points
+ * are the {@link FaableAuthClient.signInWithOauthConnection | sign-in}
+ * methods and {@link FaableAuthClient.getSession | getSession}.
+ *
+ * @category Getting started
+ * @see {@link https://faable.com/docs/auth/get-started | Get Started with Faable Auth}
+ */
 export class FaableAuthClient extends Base {
   domainUrl: string
   tokenIssuer: string
@@ -137,6 +151,7 @@ export class FaableAuthClient extends Base {
    * ```
    * @see {@link https://faable.com/docs/auth/get-started | Get Started with Faable Auth}
    * @see {@link https://faable.com/docs/auth/clients | Clients}
+   * @category Getting started
    */
   constructor(config: FaableAuthClientConfig) {
     const debug = config?.debug || false
@@ -193,6 +208,7 @@ export class FaableAuthClient extends Base {
    *
    * @returns The cached {@link Session} or `null` if no user is signed in.
    * @see {@link https://faable.com/docs/auth/oidc/userinfo | UserInfo}
+   * @category Sessions
    */
   get session() {
     return this._session
@@ -214,6 +230,7 @@ export class FaableAuthClient extends Base {
    * if (error) console.error('Auth redirect failed', error)
    * ```
    * @see {@link https://faable.com/docs/auth/oauth-flows/authorization-code | Authorization Code with PKCE}
+   * @category Lifecycle
    */
   async initialize(): Promise<InitializeResult> {
     if (this.initializePromise) {
@@ -672,6 +689,7 @@ export class FaableAuthClient extends Base {
    * })
    * ```
    * @see {@link https://faable.com/docs/auth/oauth-flows/refresh-token | Refresh Token}
+   * @category Sessions
    */
   async startAutoRefresh() {
     this._removeVisibilityChangedCallback()
@@ -885,6 +903,7 @@ export class FaableAuthClient extends Base {
    * ```
    * @see {@link https://faable.com/docs/auth/connections | Connections}
    * @see {@link https://faable.com/docs/auth/oauth-flows/authorization-code | Authorization Code with PKCE}
+   * @category Sign in
    */
   async signInWithOauthConnection(
     credentials: SignInWithOAuthConnection
@@ -921,6 +940,7 @@ export class FaableAuthClient extends Base {
    * })
    * ```
    * @see {@link https://faable.com/docs/auth/connections | Connections}
+   * @category Sign in
    */
   async signInWithUsernamePassword(data: {
     username: string
@@ -973,6 +993,7 @@ export class FaableAuthClient extends Base {
    * })
    * ```
    * @see {@link https://faable.com/docs/auth/passwordless | Passwordless Authentication}
+   * @category Sign in
    */
   async signInWithOtp(data: {
     username: string
@@ -1046,6 +1067,7 @@ export class FaableAuthClient extends Base {
    * })
    * ```
    * @see {@link https://faable.com/docs/auth/passwordless | Passwordless Authentication}
+   * @category Sign in
    */
   async signInWithPasswordless(data: {
     email: string
@@ -1076,6 +1098,7 @@ export class FaableAuthClient extends Base {
    * await auth.changePassword({ email: 'user@example.com' })
    * ```
    * @see {@link https://faable.com/docs/auth/connections | Connections}
+   * @category Account
    */
   async changePassword(params: {
     email: string
@@ -1118,6 +1141,7 @@ export class FaableAuthClient extends Base {
    * window.open(url, 'login', 'popup')
    * ```
    * @see {@link https://faable.com/docs/auth/oauth-flows/authorization-code | Authorization Code with PKCE}
+   * @category Authorize URLs
    */
   buildAuthorizeUrl(
     options: {
@@ -1160,6 +1184,7 @@ export class FaableAuthClient extends Base {
    * })
    * ```
    * @see {@link https://faable.com/docs/auth/oauth-flows/authorization-code | Authorization Code with PKCE}
+   * @category Authorize URLs
    */
   authorize(options: {
     redirectTo?: string
@@ -1219,6 +1244,7 @@ export class FaableAuthClient extends Base {
    * await auth.setSession({ access_token, refresh_token })
    * ```
    * @see {@link https://faable.com/docs/auth/oidc/userinfo | UserInfo}
+   * @category Sessions
    */
   async setSession(currentSession: {
     access_token: string
@@ -1251,6 +1277,7 @@ export class FaableAuthClient extends Base {
    * if (data.session) console.log(data.session.user)
    * ```
    * @see {@link https://faable.com/docs/auth/oidc/userinfo | UserInfo}
+   * @category Sessions
    */
   async getSession() {
     await this.initializePromise
@@ -1675,6 +1702,7 @@ export class FaableAuthClient extends Base {
    * await auth.signOut({ scope: 'local' }) // only this device
    * ```
    * @see {@link https://faable.com/docs/auth/oidc/logout | Logout}
+   * @category Sign out
    */
   async signOut(
     options: SignOut = { scope: 'global' }
@@ -1744,6 +1772,7 @@ export class FaableAuthClient extends Base {
    * subscription.unsubscribe()
    * ```
    * @see {@link https://faable.com/docs/auth/get-started | Get Started with Faable Auth}
+   * @category Sessions
    */
   onAuthStateChange(
     callback: (
@@ -1816,6 +1845,7 @@ export class FaableAuthClient extends Base {
    * const { data, error } = await auth.refreshSession()
    * ```
    * @see {@link https://faable.com/docs/auth/oauth-flows/refresh-token | Refresh Token}
+   * @category Sessions
    */
   async refreshSession(currentSession?: {
     refresh_token: string
