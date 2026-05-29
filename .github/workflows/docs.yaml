@@ -13,7 +13,9 @@ permissions:
   id-token: write
 concurrency:
   group: pages
-  cancel-in-progress: true
+  # Let in-progress Pages deployments finish; cancelling them mid-flight
+  # produces spurious failures (per GitHub's official Pages workflow).
+  cancel-in-progress: false
 jobs:
   build-deploy:
     # On workflow_run only deploy when the release succeeded; always run manual dispatch.
