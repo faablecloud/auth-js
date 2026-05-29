@@ -11,7 +11,8 @@ export default [
       'pkg/**',
       'node_modules/**',
       'test-results/**',
-      'examples/**'
+      'examples/**',
+      'docs-site/**'
     ]
   },
   js.configs.recommended,

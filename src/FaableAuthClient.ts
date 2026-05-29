@@ -626,8 +626,8 @@ export class FaableAuthClient extends Base {
   /**
    * Removes any registered visibilitychange callback.
    *
-   * {@see #startAutoRefresh}
-   * {@see #stopAutoRefresh}
+   * @see startAutoRefresh
+   * @see stopAutoRefresh
    */
   private _removeVisibilityChangedCallback() {
     this._debug('#_removeVisibilityChangedCallback()')

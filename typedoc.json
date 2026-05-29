@@ -1,0 +1,27 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/entry.ts"],
+  "tsconfig": "tsconfig.json",
+  "out": "docs-site",
+  "readme": "README.md",
+  "name": "@faable/auth-js",
+  "includeVersion": true,
+  "excludeInternal": true,
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "categorizeByGroup": true,
+  "intentionallyNotExported": [
+    "AuthChangeEventMFA",
+    "BaseLogOptions",
+    "PromisifyMethods",
+    "InitializeResult",
+    "AuthorizationParams",
+    "LockFunc",
+    "CookieAttributes",
+    "CookieJar"
+  ],
+  "navigationLinks": {
+    "GitHub": "https://github.com/faablecloud/auth-js",
+    "npm": "https://www.npmjs.com/package/@faable/auth-js"
+  }
+}

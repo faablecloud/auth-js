@@ -37,3 +37,7 @@ yarn-error.*
 pkg
 
 test-results
+
+# typedoc output
+docs-site/
+.npmrc

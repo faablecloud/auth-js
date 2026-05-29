@@ -2,3 +2,4 @@ src/
 .github
 .releaserc.json
 tsconfig.json
+.npmrc
