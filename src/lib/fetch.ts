@@ -1,4 +1,5 @@
 import { fetch } from './globals'
+import { version } from './version'
 
 export type JsonResponse<T = any> = {
   data: T | null
@@ -11,7 +12,12 @@ type RequestInitWithToken = RequestInit & {
 }
 
 const headers = (init: Partial<RequestInitWithToken> = {}) => {
-  let headers = {}
+  // Identify ourselves as a first-party client so the auth server can tell
+  // SDK traffic apart from the dashboard or third-party integrations.
+  // Format: `<name>/<version>` (version injected at release time).
+  let headers: Record<string, string> = {
+    'x-faable-client': `auth-sdk/${version}`
+  }
   if (init?.token) {
     headers = { ...headers, Authorization: `Bearer ${init?.token}` }
   }
