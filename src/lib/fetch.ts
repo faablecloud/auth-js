@@ -13,10 +13,11 @@ type RequestInitWithToken = RequestInit & {
 
 const headers = (init: Partial<RequestInitWithToken> = {}) => {
   // Identify ourselves as a first-party client so the auth server can tell
-  // SDK traffic apart from the dashboard or third-party integrations.
-  // Format: `<name>/<version>` (version injected at release time).
+  // auth-js (browser OAuth SDK) traffic apart from the dashboard, the
+  // management SDK, or third-party integrations. Format: `<name>/<version>`
+  // (version injected at release time).
   let headers: Record<string, string> = {
-    'x-faable-client': `auth-sdk/${version}`
+    'x-faable-client': `auth-js/${version}`
   }
   if (init?.token) {
     headers = { ...headers, Authorization: `Bearer ${init?.token}` }
