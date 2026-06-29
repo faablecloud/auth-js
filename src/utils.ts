@@ -43,13 +43,25 @@ export const getTokenIssuer = (
   return `${domainUrl}`
 }
 
+// Normaliza el `domain` para que dé igual cómo lo pase el usuario: con o sin
+// protocolo, con trailing slash, o incluso con protocolo duplicado (el valor
+// que el dashboard copia ya trae `https://`). Siempre devuelve
+// `<protocol>://<host>` sin barra final.
 export const getDomain = (domainUrl: string) => {
-  if (!/^(https|http)?:\/\//.test(domainUrl)) {
-    const protocol = location?.protocol || 'https'
-    return `${protocol}//${domainUrl}`
+  const raw = (domainUrl ?? '').trim().replace(/\/+$/, '')
+  // Usuario pasó protocolo (uno o varios, p.ej. "https://https://x"):
+  // preservar http/https intencionado y descartar duplicados.
+  const match = raw.match(/^(https?):\/\/(.*)$/i)
+  if (match) {
+    const host = match[2].replace(/^(https?:\/\/)+/i, '')
+    return `${match[1].toLowerCase()}://${host}`
   }
-
-  return domainUrl
+  // Sin protocolo: heredar el del documento actual en browser, https fuera de él.
+  const protocol =
+    typeof location !== 'undefined' && location?.protocol
+      ? location.protocol.replace(/:$/, '')
+      : 'https'
+  return `${protocol}://${raw}`
 }
 
 export const encode = (value: string) => btoa(value)

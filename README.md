@@ -61,7 +61,7 @@ await auth.signInWithOauthConnection({ connection: 'google' })
 
 | Option          | Type               | Description                                                           |
 | --------------- | ------------------ | --------------------------------------------------------------------- |
-| `domain`        | `string`           | **Required.** Your Faable Auth tenant domain.                         |
+| `domain`        | `string`           | **Required.** Your Faable Auth tenant domain. The protocol is optional — `tenant.auth.faable.link` and `https://tenant.auth.faable.link` are equivalent. |
 | `clientId`      | `string`           | **Required.** Application client ID.                                  |
 | `redirectUri`   | `string`           | Default callback URL. Falls back to `window.location.origin`.         |
 | `scope`         | `string`           | Space-separated scopes. Defaults to `openid profile email`.           |
