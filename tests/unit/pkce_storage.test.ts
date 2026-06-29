@@ -71,4 +71,42 @@ describe('pkce_storage', () => {
     const result = await loadCodeVerifier(storage, KEY, { now })
     expect(result).toEqual({ verifier: 'abc' })
   })
+
+  it('round-trips returnTo when read within TTL', async () => {
+    const now = 1_700_000_000_000
+    await saveCodeVerifier(storage, KEY, {
+      verifier: 'abc',
+      returnTo: '/dashboard',
+      now
+    })
+
+    const result = await loadCodeVerifier(storage, KEY, { now: now + 60_000 })
+
+    expect(result).toEqual({ verifier: 'abc', returnTo: '/dashboard' })
+  })
+
+  it('round-trips redirectType and returnTo together', async () => {
+    const now = 1_700_000_000_000
+    await saveCodeVerifier(storage, KEY, {
+      verifier: 'abc',
+      redirectType: 'PASSWORD_RECOVERY',
+      returnTo: '/settings',
+      now
+    })
+
+    const result = await loadCodeVerifier(storage, KEY, { now })
+
+    expect(result).toEqual({
+      verifier: 'abc',
+      redirectType: 'PASSWORD_RECOVERY',
+      returnTo: '/settings'
+    })
+  })
+
+  it('omits returnTo when none was provided', async () => {
+    const now = 1_700_000_000_000
+    await saveCodeVerifier(storage, KEY, { verifier: 'abc', now })
+    const result = await loadCodeVerifier(storage, KEY, { now })
+    expect(result).not.toHaveProperty('returnTo')
+  })
 })

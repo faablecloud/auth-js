@@ -76,6 +76,30 @@ export function decodeJWTPayload(token: string) {
   return JSON.parse(decodeBase64URL(base64Url))
 }
 
+/**
+ * Derives a session's expiry from a redirect that may omit the OIDC envelope
+ * (`expires_in` / `token_type`). Some flows hand the tokens back in the query
+ * string with only the token pair; in that case we trust the access token's
+ * own `exp` claim. An explicit `expires_at` (in seconds) wins when provided.
+ *
+ * @param accessToken The access token JWT to read `exp` from.
+ * @param expiresAt Optional explicit absolute expiry (seconds since epoch).
+ * @param now Current time in seconds (injectable for tests).
+ * @returns Absolute `expiresAt` and relative `expiresIn`, both in seconds.
+ */
+export function expiryFromAccessToken(
+  accessToken: string,
+  expiresAt?: string | number,
+  now: number = Date.now() / 1000
+): { expiresAt: number; expiresIn: number } {
+  const payload = decodeJWTPayload(accessToken)
+  const resolvedExpiresAt =
+    expiresAt != null && expiresAt !== ''
+      ? Number(expiresAt)
+      : (payload.exp ?? now)
+  return { expiresAt: resolvedExpiresAt, expiresIn: resolvedExpiresAt - now }
+}
+
 export const verify = (options: JWTVerifyOptions) => {
   if (!options.id_token) {
     throw new Error('ID token is required but missing')

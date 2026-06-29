@@ -420,6 +420,13 @@ export type SignInWithOAuthConnection = {
   connection?: string
   /** A URL to send the user to after they are confirmed. */
   redirectTo?: string
+  /**
+   * App-side destination to return the user to once the callback has been
+   * processed. It is stored locally alongside the PKCE verifier (never sent
+   * to the server) and surfaced back as `returnTo` on the result of
+   * {@link FaableAuthClient.handleRedirectCallback} / {@link FaableAuthClient.initialize}.
+   */
+  returnTo?: string
   /** A space-separated list of scopes granted to the OAuth application. */
   scopes?: string
   /** An object of query params */
@@ -566,7 +573,20 @@ export type SignOut = {
   scope?: 'global' | 'local' | 'others'
 }
 
-export type InitializeResult = { error: AuthError | null }
+export type InitializeResult = {
+  error: AuthError | null
+  /**
+   * Set when a sign-in redirect was consumed from the URL (e.g.
+   * `'PASSWORD_RECOVERY'`). Absent when the session was recovered from
+   * storage or there was nothing to process.
+   */
+  redirectType?: string | null
+  /**
+   * The app-side destination passed as `returnTo` when starting the sign-in,
+   * round-tripped through the flow so the callback page can navigate there.
+   */
+  returnTo?: string | null
+}
 
 export type UserResponse =
   | {

@@ -7,11 +7,13 @@ type StoredCodeVerifier = {
   verifier: string
   createdAt: number
   redirectType?: string
+  returnTo?: string
 }
 
 type LoadedCodeVerifier = {
   verifier: string
   redirectType?: string
+  returnTo?: string
 }
 
 const isStoredCodeVerifier = (value: unknown): value is StoredCodeVerifier =>
@@ -26,16 +28,21 @@ export const saveCodeVerifier = async (
   {
     verifier,
     redirectType,
+    returnTo,
     now = Date.now()
   }: {
     verifier: string
     redirectType?: string
+    returnTo?: string
     now?: number
   }
 ): Promise<void> => {
   const payload: StoredCodeVerifier = { verifier, createdAt: now }
   if (redirectType) {
     payload.redirectType = redirectType
+  }
+  if (returnTo) {
+    payload.returnTo = returnTo
   }
   await setItemAsync(storage, key, payload)
 }
@@ -55,7 +62,12 @@ export const loadCodeVerifier = async (
     return null
   }
 
-  return raw.redirectType
-    ? { verifier: raw.verifier, redirectType: raw.redirectType }
-    : { verifier: raw.verifier }
+  const loaded: LoadedCodeVerifier = { verifier: raw.verifier }
+  if (raw.redirectType) {
+    loaded.redirectType = raw.redirectType
+  }
+  if (raw.returnTo) {
+    loaded.returnTo = raw.returnTo
+  }
+  return loaded
 }

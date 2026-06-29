@@ -27,7 +27,7 @@ import {
   sleep
 } from './lib/helpers'
 import { windowHelpers } from './lib/helpers/window'
-import { decodeJWTPayload } from './lib/jwt'
+import { decodeJWTPayload, expiryFromAccessToken } from './lib/jwt'
 import { getSessionFromCookies } from './lib/nextjs'
 import { loadCodeVerifier } from './lib/pkce_storage'
 import { isValidSession } from './lib/session_helpers'
@@ -102,6 +102,7 @@ export class FaableAuthClient extends Base {
   sessionCheckExpiryDays: number
 
   protected initializePromise: Promise<InitializeResult> | null = null
+  protected _lastInitializeResult: InitializeResult | null = null
   protected detectSessionInUrl = true
 
   protected storageKey: string
@@ -243,7 +244,55 @@ export class FaableAuthClient extends Base {
       })
     })()
 
-    return await this.initializePromise
+    const result = await this.initializePromise
+    this._lastInitializeResult = result
+    return result
+  }
+
+  /**
+   * The result of the most recent {@link FaableAuthClient.initialize} run, or
+   * `null` while the first one is still in flight.
+   *
+   * The constructor starts `initialize()` in the background and discards the
+   * promise; this accessor lets code that cannot await it (for example a
+   * React provider effect) read whether the last OAuth/redirect attempt
+   * errored, instead of being stuck with a session that silently stays
+   * `null`.
+   *
+   * @category Lifecycle
+   */
+  get lastInitializeResult(): InitializeResult | null {
+    return this._lastInitializeResult
+  }
+
+  /**
+   * Completes an OAuth / magic-link / password-recovery redirect on your
+   * callback route and reports the outcome.
+   *
+   * The SDK already consumes the URL during the `initialize()` it kicks off
+   * from the constructor; this is a thin, discoverable wrapper that awaits
+   * that same in-flight run (idempotent) so you can:
+   *
+   * - redirect **only once** the token exchange has finished, and
+   * - surface `error` instead of hanging on a "Signing you in…" screen when
+   *   the exchange fails (e.g. an expired PKCE verifier).
+   *
+   * It also returns `returnTo` — the app-side destination you optionally
+   * passed to `signInWith*({ returnTo })` — so you don't need a side channel
+   * (like `sessionStorage`) to remember where to send the user.
+   *
+   * @example
+   * ```ts
+   * // app/callback/page.tsx
+   * const { error, returnTo } = await auth.handleRedirectCallback()
+   * if (error) showError(error.message)
+   * else router.replace(returnTo ?? '/')
+   * ```
+   * @see {@link FaableAuthClient.initialize}
+   * @category Lifecycle
+   */
+  async handleRedirectCallback(): Promise<InitializeResult> {
+    return await this.initialize()
   }
 
   /**
@@ -284,7 +333,7 @@ export class FaableAuthClient extends Base {
           return { error }
         }
 
-        const { session, redirectType } = data
+        const { session, redirectType, returnTo } = data
 
         this._debug(
           '#_initialize()',
@@ -304,7 +353,7 @@ export class FaableAuthClient extends Base {
           }
         }, 0)
 
-        return { error: null }
+        return { error: null, redirectType, returnTo }
       }
       // no login attempt via callback url try to recover session from storage
       await this._recoverAndRefresh()
@@ -331,10 +380,17 @@ export class FaableAuthClient extends Base {
    */
   private async _getSessionFromURL(flow: AuthFlowType): Promise<
     | {
-        data: { session: Session; redirectType: string | null }
+        data: {
+          session: Session
+          redirectType: string | null
+          returnTo: string | null
+        }
         error: null
       }
-    | { data: { session: null; redirectType: null }; error: AuthError }
+    | {
+        data: { session: null; redirectType: null; returnTo: null }
+        error: AuthError
+      }
   > {
     try {
       const params = parseParametersFromURL(window?.location.href)
@@ -350,7 +406,11 @@ export class FaableAuthClient extends Base {
         clearURLParameters(['code'])
 
         return {
-          data: { session: data.session, redirectType: null },
+          data: {
+            session: data.session,
+            redirectType: data.redirectType,
+            returnTo: data.returnTo
+          },
           error: null
         }
       }
@@ -376,16 +436,29 @@ export class FaableAuthClient extends Base {
         token_type
       } = params
 
-      if (!access_token || !expires_in || !refresh_token || !token_type) {
+      // We only strictly need the token pair. Some flows hand the tokens back
+      // in the query string without the full OIDC envelope (`expires_in` /
+      // `token_type`); fall back to the access token's own `exp` claim and a
+      // `bearer` default instead of rejecting an otherwise-valid callback.
+      if (!access_token || !refresh_token) {
         throw new AuthImplicitGrantRedirectError('No session defined in URL')
       }
 
-      // Check time is valid
-      const { expiresAt, expiresIn } = checkExpiresInTime({
-        expires_in,
-        expires_at,
-        refreshTick: AUTO_REFRESH_TICK_DURATION
-      })
+      let expiresAt: number
+      let expiresIn: number
+      if (expires_in) {
+        // Check time is valid
+        ;({ expiresAt, expiresIn } = checkExpiresInTime({
+          expires_in,
+          expires_at,
+          refreshTick: AUTO_REFRESH_TICK_DURATION
+        }))
+      } else {
+        ;({ expiresAt, expiresIn } = expiryFromAccessToken(
+          access_token,
+          expires_at
+        ))
+      }
 
       const { data: user, error } = await this._getUser(access_token)
 
@@ -398,7 +471,7 @@ export class FaableAuthClient extends Base {
         expires_in: expiresIn,
         expires_at: expiresAt,
         refresh_token,
-        token_type,
+        token_type: token_type || 'bearer',
         user
       }
 
@@ -412,11 +485,17 @@ export class FaableAuthClient extends Base {
       ])
       this._debug('#_getSessionFromURL()', 'clearing window.location.hash')
 
-      return { data: { session, redirectType: params.type }, error: null }
+      return {
+        data: { session, redirectType: params.type, returnTo: null },
+        error: null
+      }
     } catch (error) {
       this._debug(error)
       if (isAuthError(error)) {
-        return { data: { session: null, redirectType: null }, error }
+        return {
+          data: { session: null, redirectType: null, returnTo: null },
+          error
+        }
       }
       throw error
     }
@@ -424,11 +503,21 @@ export class FaableAuthClient extends Base {
 
   private async _exchangeCodeForSession(authCode: string): Promise<
     | {
-        data: { session: Session; user: User; redirectType: string | null }
+        data: {
+          session: Session
+          user: User
+          redirectType: string | null
+          returnTo: string | null
+        }
         error: null
       }
     | {
-        data: { session: null; user: null; redirectType: null }
+        data: {
+          session: null
+          user: null
+          redirectType: null
+          returnTo: null
+        }
         error: AuthError
       }
   > {
@@ -438,13 +527,17 @@ export class FaableAuthClient extends Base {
     )
     if (!stored) {
       return {
-        data: { user: null, session: null, redirectType: null },
+        data: { user: null, session: null, redirectType: null, returnTo: null },
         error: new AuthPKCEGrantCodeExchangeError(
           'No active PKCE code verifier — the authorization flow has expired or was not started'
         )
       }
     }
-    const { verifier: codeVerifier, redirectType = null } = stored
+    const {
+      verifier: codeVerifier,
+      redirectType = null,
+      returnTo = null
+    } = stored
 
     const rawResponse = await _post<Partial<RawAuthResponse>>(
       `${this.domainUrl}/oauth/token`,
@@ -466,10 +559,13 @@ export class FaableAuthClient extends Base {
     await this.storage.removeItem(`${this.storageKey}-code-verifier`)
 
     if (error) {
-      return { data: { user: null, session: null, redirectType: null }, error }
+      return {
+        data: { user: null, session: null, redirectType: null, returnTo: null },
+        error
+      }
     } else if (!data || !data.session || !data.user) {
       return {
-        data: { user: null, session: null, redirectType: null },
+        data: { user: null, session: null, redirectType: null, returnTo: null },
         error: new AuthInvalidTokenResponseError()
       }
     }
@@ -490,7 +586,11 @@ export class FaableAuthClient extends Base {
       await this._notifyAllSubscribers('SIGNED_IN', session)
     }
     return {
-      data: { ...data, redirectType: redirectType ?? null } as any,
+      data: {
+        ...data,
+        redirectType: redirectType ?? null,
+        returnTo: returnTo ?? null
+      } as any,
       error
     }
   }
@@ -838,6 +938,7 @@ export class FaableAuthClient extends Base {
       connection?: string
       connection_id?: string
       redirectTo?: string
+      returnTo?: string
       scopes?: string
       response_type?: 'code' | 'token'
       queryParams?: { [key: string]: string }
@@ -857,7 +958,12 @@ export class FaableAuthClient extends Base {
 
     if (this.flowType === 'pkce') {
       const [codeChallenge, codeChallengeMethod] =
-        await getCodeChallengeAndMethod(this.storage, this.storageKey)
+        await getCodeChallengeAndMethod(
+          this.storage,
+          this.storageKey,
+          false,
+          params.returnTo
+        )
 
       urlParams = {
         ...urlParams,
@@ -912,6 +1018,7 @@ export class FaableAuthClient extends Base {
       connection: credentials.connection,
       connection_id: credentials.connection_id,
       redirectTo: credentials?.redirectTo,
+      returnTo: credentials?.returnTo,
       scopes: credentials?.scopes,
       queryParams: credentials.queryParams,
       skipBrowserRedirect: credentials.skipBrowserRedirect,
@@ -1200,6 +1307,7 @@ export class FaableAuthClient extends Base {
     connection?: string
     connection_id?: string
     redirectTo?: string
+    returnTo?: string
     scopes?: string
     queryParams?: { [key: string]: string }
     skipBrowserRedirect?: boolean
@@ -1212,6 +1320,7 @@ export class FaableAuthClient extends Base {
         connection: options.connection,
         connection_id: options.connection_id,
         redirectTo: options.redirectTo,
+        returnTo: options.returnTo,
         scopes: options.scopes,
         queryParams: options.queryParams,
         audience: options.audience
