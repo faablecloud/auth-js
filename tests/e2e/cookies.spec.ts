@@ -107,6 +107,66 @@ test('signOut clears the cookie', async ({ page }) => {
   expect(cookiePresent).toBe(false)
 })
 
+test('signOut() navigates top-level to /logout to clear the SSO cookie', async ({
+  page
+}) => {
+  await page.goto('/')
+  await page.waitForFunction(() => typeof window.__faable !== 'undefined')
+  await page.evaluate(() =>
+    window.__faable.createClient({
+      cookieOptions: { path: '/', sameSite: 'Lax' }
+    })
+  )
+  await page.evaluate(() =>
+    window.__client.signInWithOtp({
+      username: 'cookie@example.com',
+      otp: '654321'
+    })
+  )
+
+  // Default (global) signOut must be a real navigation to /logout — the only
+  // way to clear the auth server's SSO cookie. Don't return the promise: it
+  // never resolves on the redirect path (the page is unloading).
+  await Promise.all([
+    page.waitForURL(/\/logout\?/),
+    page.evaluate(() => {
+      window.__client.signOut()
+    })
+  ])
+
+  const url = new URL(page.url())
+  expect(url.pathname).toBe('/logout')
+  expect(url.searchParams.get('client_id')).toBe('test-client')
+})
+
+test('signOut({ redirect: false }) clears the cookie without navigating', async ({
+  page
+}) => {
+  await page.goto('/')
+  await page.waitForFunction(() => typeof window.__faable !== 'undefined')
+  await page.evaluate(() =>
+    window.__faable.createClient({
+      cookieOptions: { path: '/', sameSite: 'Lax' }
+    })
+  )
+  await page.evaluate(() =>
+    window.__client.signInWithOtp({
+      username: 'cookie@example.com',
+      otp: '654321'
+    })
+  )
+
+  await page.evaluate(() => window.__client.signOut({ redirect: false }))
+
+  expect(new URL(page.url()).pathname).toBe('/')
+  const cookiePresent = await page.evaluate(key => {
+    return document.cookie
+      .split(';')
+      .some(c => c.trim().startsWith(encodeURIComponent(key) + '='))
+  }, STORAGE_KEY)
+  expect(cookiePresent).toBe(false)
+})
+
 test('values containing ";" survive the cookie round-trip', async ({
   page,
   request

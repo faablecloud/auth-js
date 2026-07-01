@@ -1480,9 +1480,16 @@ export class FaableAuthClient extends Base {
       scope?: string
       response_type?: string
       audience?: string
+      /**
+       * Extra `/authorize` params merged in as-is — e.g.
+       * `{ prompt: 'select_account' }` or `{ prompt: 'login' }` to force
+       * account selection / re-authentication even when an SSO session exists.
+       */
+      queryParams?: { [key: string]: string }
     } = {}
   ): string {
     const params: Record<string, string | undefined> = {
+      ...options.queryParams,
       client_id: this.clientId,
       redirect_uri:
         options.redirectTo || this.redirectUri || window?.location.origin,
@@ -1497,6 +1504,33 @@ export class FaableAuthClient extends Base {
     ) as Record<string, string>
 
     return `${this.domainUrl}/authorize?${new URLSearchParams(definedParams).toString()}`
+  }
+
+  /**
+   * Builds the tenant's RP-initiated logout URL
+   * (`{domain}/logout?client_id=…`).
+   *
+   * Navigate the browser to it (top-level, not `fetch`) to end the session and
+   * clear the auth server's SSO cookie — the only reliable way to do that from
+   * another origin. {@link FaableAuthClient.signOut} does this for you by
+   * default; use this helper when you want to drive the navigation yourself.
+   *
+   * @param options.returnTo Where to send the browser after logout, mapped to
+   *   the OIDC `post_logout_redirect_uri`. Must be registered as a logout URL
+   *   on the client or the server responds `400`.
+   * @example
+   * ```ts
+   * window.location.assign(auth.getLogoutUrl({ returnTo: 'https://app.example.com' }))
+   * ```
+   * @see {@link https://faable.com/docs/auth/oidc/logout | Logout}
+   * @category Authorize URLs
+   */
+  getLogoutUrl(options: { returnTo?: string } = {}): string {
+    const params: Record<string, string> = { client_id: this.clientId }
+    if (options.returnTo) {
+      params.post_logout_redirect_uri = options.returnTo
+    }
+    return `${this.domainUrl}/logout?${new URLSearchParams(params).toString()}`
   }
 
   /**
@@ -2030,16 +2064,28 @@ export class FaableAuthClient extends Base {
    * access token JWT itself remains valid until its `exp` — keep that
    * expiry short.
    *
+   * **By default (global scope, in a browser) this navigates the page to the
+   * auth server's `/logout` to also clear the SSO cookie**, then returns to
+   * `returnTo` if given. Without that navigation the SSO session survives on
+   * the auth domain and the next `/authorize` silently re-logs the previous
+   * user — a cross-origin `fetch` cannot clear that cookie. On this path the
+   * returned promise does not resolve (the browser is unloading). Pass
+   * `{ redirect: false }` to keep the legacy fetch-only behaviour, or use
+   * {@link FaableAuthClient.getLogoutUrl} to drive the navigation yourself.
+   *
    * Scopes:
-   * - `'global'` (default) — invalidate all refresh tokens for the user
-   * - `'local'` — only clear this client's storage
+   * - `'global'` (default) — invalidate all refresh tokens for the user and,
+   *   in a browser, redirect to `/logout` to clear the SSO cookie
+   * - `'local'` — only clear this client's storage (no redirect)
    * - `'others'` — invalidate every refresh token except this device's; no
-   *   `SIGNED_OUT` event is fired locally
+   *   `SIGNED_OUT` event is fired locally (no redirect)
    *
    * @example
    * ```ts
-   * await auth.signOut() // global — all sessions for this user
-   * await auth.signOut({ scope: 'local' }) // only this device
+   * await auth.signOut() // global — clears local + auth SSO cookie via redirect
+   * await auth.signOut({ returnTo: 'https://app.example.com/bye' }) // + landing
+   * await auth.signOut({ redirect: false }) // legacy: local + best-effort fetch
+   * await auth.signOut({ scope: 'local' }) // only this device, no redirect
    * ```
    * @see {@link https://faable.com/docs/auth/oidc/logout | Logout}
    * @category Sign out
@@ -2055,17 +2101,39 @@ export class FaableAuthClient extends Base {
   }
 
   protected async _signOut(
-    { scope }: SignOut = { scope: 'global' }
+    { scope = 'global', redirect, returnTo }: SignOut = { scope: 'global' }
   ): Promise<{ error: AuthError | null }> {
     return await this._useSession(async result => {
       const { data, error: sessionError } = result
       if (sessionError) {
         return { error: sessionError }
       }
+
+      // RP-initiated logout: a top-level navigation to /logout is the only way
+      // to clear the auth server's SSO cookie from another origin (a cross-site
+      // fetch can neither send nor clear it). Default for the global scope in a
+      // browser; opt out with { redirect: false }.
+      const shouldRedirect =
+        scope === 'global' && redirect !== false && isBrowser()
+      if (shouldRedirect) {
+        // Tear down local state first — the page unloads on the navigation.
+        await this._removeSession()
+        await this.storage.removeItem(`${this.storageKey}-code-verifier`)
+        await this._notifyAllSubscribers('SIGNED_OUT', null)
+        windowHelpers.redirect(this.getLogoutUrl({ returnTo }))
+        // The browser is navigating away — never resolve, so a loading state
+        // tied to the await doesn't flip back before the page unloads.
+        await new Promise<never>(() => {})
+      }
+
+      // Non-redirect path (opted out, non-global scope, or non-browser):
+      // best-effort cross-origin call to revoke server-side tokens. Send
+      // credentials so it can clear the cookie when app + auth share a site.
       const accessToken = data.session?.access_token
       if (accessToken) {
         const { error } = await this.api.signOut({
-          client_id: this.clientId
+          client_id: this.clientId,
+          credentials: 'include'
         })
         if (error) {
           // ignore 404s since user might not exist anymore

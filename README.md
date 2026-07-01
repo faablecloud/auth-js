@@ -144,9 +144,31 @@ await auth.changePassword({ email: 'user@example.com' })
 
 ### Sign out
 
+By default `signOut()` (global scope, in a browser) **navigates the page to the
+auth server's `/logout`** to clear the SSO cookie, then returns to `returnTo` if
+you pass one. This matters: the SSO cookie lives on the auth domain, so a
+cross-origin `fetch` from your app can neither send nor clear it. Without the
+navigation the SSO session survives and the next `signInWith…` silently re-logs
+the previous user, ignoring the requested connection.
+
 ```ts
-await auth.signOut() // global — all sessions for this user
-await auth.signOut({ scope: 'local' }) // only this device
+await auth.signOut() // clears local + redirects to /logout to clear the SSO cookie
+await auth.signOut({ returnTo: 'https://app.example.com/bye' }) // + landing page
+await auth.signOut({ scope: 'local' }) // only this device's storage, no redirect
+await auth.signOut({ redirect: false }) // legacy: local + best-effort fetch, no nav
+```
+
+`returnTo` maps to the OIDC `post_logout_redirect_uri` and **must be registered
+as a logout URL on the client**, or the server responds `400`.
+
+On the redirect path the returned promise does not resolve (the browser is
+navigating away) — do not re-enable UI after the `await`. To drive the
+navigation yourself, build the URL with `getLogoutUrl`:
+
+```ts
+window.location.assign(
+  auth.getLogoutUrl({ returnTo: 'https://app.example.com' })
+)
 ```
 
 ## Error handling

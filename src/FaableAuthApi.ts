@@ -13,13 +13,20 @@ export default class FaableAuthApi extends BaseLog {
     return 'api'
   }
 
-  async signOut(params: {
+  async signOut({
+    credentials,
+    ...params
+  }: {
     client_id: string
     returnTo?: string
+    credentials?: RequestCredentials
   }): Promise<{ data: null; error: AuthError | null }> {
     const url = `${this.base_url}/logout?${new URLSearchParams(params)}`
     this._debug(`requesting ${url}`)
-    const res = await _get(url)
+    // Send cookies so the /logout can clear the SSO cookie when the app and the
+    // auth server share a site. Cross-site it is still blocked — a top-level
+    // navigation (see FaableAuthClient.signOut) is the robust path.
+    const res = await _get(url, credentials ? { credentials } : {})
     this._debug(res)
     if (res.error) {
       return { error: res.error, data: null }

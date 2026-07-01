@@ -603,6 +603,31 @@ export type SignOut = {
    *   `SIGNED_OUT` event is fired locally
    */
   scope?: 'global' | 'local' | 'others'
+  /**
+   * Whether to end the session with a top-level navigation to the auth
+   * server's `/logout` (RP-initiated logout). **Defaults to `true`** for the
+   * `global` scope in a browser.
+   *
+   * This is required to clear the auth server's SSO cookie: it lives on the
+   * auth domain, so a cross-origin `fetch` from your app can neither send nor
+   * clear it. Without the navigation the SSO session survives and the next
+   * `/authorize` silently re-logs the previous user, ignoring the requested
+   * connection.
+   *
+   * Set to `false` to keep the legacy behaviour (clear local storage + a
+   * best-effort cross-origin `fetch` to `/logout`) — e.g. when your app and
+   * the auth server share a site, or you drive the navigation yourself with
+   * {@link FaableAuthClient.getLogoutUrl}. Ignored for the `local`/`others`
+   * scopes and outside the browser.
+   */
+  redirect?: boolean
+  /**
+   * Where the auth server should send the browser back to after logging out,
+   * mapped to the OIDC `post_logout_redirect_uri`. **Must be registered as a
+   * logout URL on the client** or the server responds `400`. Only used on the
+   * redirect path.
+   */
+  returnTo?: string
 }
 
 export type InitializeResult = {

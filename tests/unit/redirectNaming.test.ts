@@ -26,6 +26,42 @@ describe('redirect param naming', () => {
 
     expect(params.get('redirect_uri')).toBe('https://app.example.com/other')
   })
+
+  it('merges queryParams (e.g. prompt) into the authorize URL', () => {
+    const auth = createClient(baseConfig)
+    const url = auth.buildAuthorizeUrl({
+      queryParams: { prompt: 'select_account' }
+    })
+    const params = new URL(url).searchParams
+
+    expect(params.get('prompt')).toBe('select_account')
+    // reserved params still win over queryParams
+    expect(params.get('client_id')).toBe('test-client')
+  })
+})
+
+describe('getLogoutUrl', () => {
+  it('builds the /logout URL with the client_id', () => {
+    const auth = createClient(baseConfig)
+    const url = new URL(auth.getLogoutUrl())
+
+    expect(url.origin + url.pathname).toBe(
+      'https://tenant.auth.faable.link/logout'
+    )
+    expect(url.searchParams.get('client_id')).toBe('test-client')
+    expect(url.searchParams.has('post_logout_redirect_uri')).toBe(false)
+  })
+
+  it('maps returnTo to post_logout_redirect_uri', () => {
+    const auth = createClient(baseConfig)
+    const url = new URL(
+      auth.getLogoutUrl({ returnTo: 'https://app.example.com/bye' })
+    )
+
+    expect(url.searchParams.get('post_logout_redirect_uri')).toBe(
+      'https://app.example.com/bye'
+    )
+  })
 })
 
 describe('OAuth connection params', () => {
