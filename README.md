@@ -92,6 +92,24 @@ In browsers the SDK uses the PKCE flow by default and exchanges the `code` for a
 session on the callback page. The first call to `createClient` automatically
 processes the URL when the user lands back on the redirect target.
 
+On the redirect success path the returned promise **does not resolve** — the
+browser is already navigating away, so a loading state you bind to the `await`
+stays on until the page unloads instead of flashing back to idle. Do not
+re-enable UI after the `await` on this path.
+
+To control the navigation yourself (e.g. custom timing, or a non-redirecting
+runtime), pass `skipBrowserRedirect: true`. The call then resolves with the
+authorization URL and leaves the navigation to you:
+
+```ts
+const { data, error } = await auth.signInWithOauthConnection({
+  connection: 'google',
+  skipBrowserRedirect: true
+})
+if (error) throw error
+window.location.assign(data.url)
+```
+
 ### Username + password
 
 ```ts

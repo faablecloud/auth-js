@@ -1017,18 +1017,29 @@ export class FaableAuthClient extends Base {
    * `/authorize` endpoint for the chosen connection.
    *
    * In browsers the SDK redirects the current window unless
-   * `skipBrowserRedirect` is `true`; the call resolves to the authorization
-   * URL so you can drive the navigation yourself. PKCE is used by default in
+   * `skipBrowserRedirect` is `true`. On that redirect success path the returned
+   * promise **never resolves** — the pending navigation owns the page, so a
+   * loading state you tie to the `await` stays on until unload instead of
+   * flashing back. Pass `skipBrowserRedirect: true` to get `{ data: { url } }`
+   * back and drive the navigation yourself. PKCE is used by default in
    * browsers, falling back to the implicit flow elsewhere. Prefer
    * `connection_id` when known — the backend resolves it without an extra
    * lookup; `connection` (by name) is kept for legacy tenants.
    *
    * @example
    * ```ts
+   * // Redirects the current window; the promise does not resolve on success.
    * await auth.signInWithOauthConnection({
    *   connection: 'google',
    *   redirectTo: 'https://app.example.com/callback'
    * })
+   *
+   * // Or take over the navigation yourself:
+   * const { data } = await auth.signInWithOauthConnection({
+   *   connection: 'google',
+   *   skipBrowserRedirect: true
+   * })
+   * window.location.assign(data.url)
    * ```
    * @see {@link https://faable.com/docs/auth/connections | Connections}
    * @see {@link https://faable.com/docs/auth/oauth-flows/authorization-code | Authorization Code with PKCE}
@@ -1543,6 +1554,14 @@ export class FaableAuthClient extends Base {
     // try to open on the browser
     if (isBrowser() && !options.skipBrowserRedirect) {
       window?.location.assign(url)
+      // `location.assign()` does not block: the navigation is scheduled but the
+      // current tick keeps running. If we resolved here, any loading state a
+      // consumer tied to the returned promise would flip back on before the
+      // page unloads (a visible flash on the button/spinner). Never resolve on
+      // the redirect success path — let the pending navigation own the UI until
+      // it unloads. Pass `skipBrowserRedirect: true` to get `{ data: { url } }`
+      // back and drive the navigation yourself.
+      await new Promise<never>(() => {})
     }
 
     return { data: { url }, error: null }
