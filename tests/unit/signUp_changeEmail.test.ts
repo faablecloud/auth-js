@@ -146,11 +146,15 @@ describe('changeEmail', () => {
     expect(error).toBeTruthy()
   })
 
-  it('posts to /user/{sub}/change-email with the session bearer token', async () => {
+  // Regression: `/me` (userinfo) exposes the user id as `user.id`, NOT
+  // `user.sub`. changeEmail 1.9.0 read only `.sub`, so a valid session was
+  // misreported as AuthSessionMissingError ("Auth session missing!").
+  it('resolves the user id from the userinfo `user.id` shape (not `sub`)', async () => {
     const auth = createClient(baseConfig())
     vi.spyOn(auth, 'getSession').mockResolvedValue({
       data: {
-        session: { access_token: 'tok-123', user: { sub: 'user_123' } }
+        // No `sub` here on purpose — this is the real /me shape.
+        session: { access_token: 'tok-123', user: { id: 'user_123' } }
       },
       error: null
     } as any)
@@ -184,5 +188,35 @@ describe('changeEmail', () => {
       redirect_uri: 'https://app.example.com/account'
     })
     expect(call?.[2]).toMatchObject({ token: 'tok-123' })
+  })
+
+  it('falls back to the access token `sub` claim when the user object has no id', async () => {
+    const b64url = (o: object) =>
+      Buffer.from(JSON.stringify(o)).toString('base64url')
+    const accessToken = `${b64url({ alg: 'RS256', typ: 'JWT' })}.${b64url({
+      sub: 'user_jwt'
+    })}.sig`
+
+    const auth = createClient(baseConfig())
+    vi.spyOn(auth, 'getSession').mockResolvedValue({
+      // user object carries neither `id` nor `sub` — only the JWT does.
+      data: { session: { access_token: accessToken, user: {} } },
+      error: null
+    } as any)
+    mPost.mockImplementation(async (url: string) =>
+      url.includes('/change-email')
+        ? { data: { status: 'verification_sent' }, error: null }
+        : { data: null, error: null }
+    )
+
+    const { error } = await auth.changeEmail({ new_email: 'new@example.com' })
+    expect(error).toBeNull()
+
+    const call = mPost.mock.calls.find(c =>
+      String(c[0]).includes('/change-email')
+    )
+    expect(call?.[0]).toBe(
+      'https://tenant.auth.faable.link/user/user_jwt/change-email'
+    )
   })
 })

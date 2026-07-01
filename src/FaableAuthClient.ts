@@ -1349,6 +1349,23 @@ export class FaableAuthClient extends Base {
   }
 
   /**
+   * Resolves the signed-in user's id from a session. Prefers the userinfo
+   * shape (`user.id`) returned by `/me`, falls back to a `sub` claim on the
+   * user object, and finally decodes the access token's `sub` — the id is
+   * always present there, so this never reports a live session as missing.
+   */
+  private _resolveUserId(session: Session): string | undefined {
+    const fromUser = (session.user as any)?.id ?? session.user?.sub
+    if (fromUser) return fromUser
+    try {
+      const payload = decodeJWTPayload(session.access_token)
+      return payload?.sub
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
    * Starts a verified email change for the currently signed-in user.
    *
    * The user must be authenticated — the call is made with the session's
@@ -1395,7 +1412,11 @@ export class FaableAuthClient extends Base {
       }
     }
 
-    const user_id = session.user?.sub
+    // Resolve the user id defensively. `/me` (userinfo) exposes it as
+    // `user.id`, but older/other shapes use the `sub` claim; fall back to the
+    // access token's own `sub` so we never mistake a present session for a
+    // missing one (that regression shipped `changeEmail` reading only `.sub`).
+    const user_id = this._resolveUserId(session)
     if (!user_id) {
       return { data: null, error: new AuthSessionMissingError() }
     }
