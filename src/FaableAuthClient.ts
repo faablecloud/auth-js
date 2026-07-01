@@ -37,6 +37,7 @@ import { localStorageAdapter } from './lib/storage/local-storage'
 import { getItemAsync, setItemAsync } from './lib/storage_helpers'
 import {
   AuthFlowType,
+  AuthResult,
   CallRefreshTokenResult,
   InitializeResult,
   OAuthResponse,
@@ -1089,7 +1090,7 @@ export class FaableAuthClient extends Base {
     redirectTo?: string
     state?: string
     audience?: string
-  }): Promise<{ data: null; error: AuthError | null }> {
+  }): Promise<AuthResult<null>> {
     const audience = data.audience ?? this.audience
     const rawAuthResponse = await _post<string>(
       `${this.domainUrl}/usernamepassword/login`,
@@ -1166,7 +1167,7 @@ export class FaableAuthClient extends Base {
     redirectTo?: string
     state?: string
     audience?: string
-  }): Promise<{ data: null; error: AuthError | null }> {
+  }): Promise<AuthResult<null>> {
     if (!data?.email || !data?.password) {
       return {
         data: null,
@@ -1312,7 +1313,7 @@ export class FaableAuthClient extends Base {
     email: string
     type: 'code' | 'link'
     audience?: string
-  }): Promise<{ data: any; error: AuthError | null }> {
+  }): Promise<AuthResult<any>> {
     const audience = data.audience ?? this.audience
     const response = await _post(`${this.domainUrl}/passwordless/start`, {
       client_id: this.clientId,
@@ -1341,7 +1342,7 @@ export class FaableAuthClient extends Base {
    */
   async changePassword(params: {
     email: string
-  }): Promise<{ data: unknown; error: AuthError | null }> {
+  }): Promise<AuthResult<unknown>> {
     if (!params?.email) {
       return {
         data: null,
@@ -1406,7 +1407,7 @@ export class FaableAuthClient extends Base {
     new_email: string
     verification_mode?: 'new_only' | 'old_and_new'
     redirect_uri?: string
-  }): Promise<{ data: unknown; error: AuthError | null }> {
+  }): Promise<AuthResult<unknown>> {
     if (!params?.new_email) {
       return {
         data: null,

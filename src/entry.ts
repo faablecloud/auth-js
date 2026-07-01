@@ -10,6 +10,7 @@ import type {
   AuthChangeEvent,
   AuthFlowType,
   AuthResponse,
+  AuthResult,
   CookieOptions,
   FaableAuthClientConfig,
   OAuthResponse,
@@ -19,6 +20,7 @@ import type {
   Subscription,
   SupportedStorage
 } from './lib/types'
+import { unwrap } from './lib/unwrap'
 
 export {
   Session,
@@ -27,13 +29,15 @@ export {
   AuthError,
   createClient,
   cookieStorageAdapter,
-  getSessionFromCookies
+  getSessionFromCookies,
+  unwrap
 }
 
 export type {
   FaableAuthClientConfig,
   SignInWithOAuthConnection,
   AuthResponse,
+  AuthResult,
   AuthChangeEvent,
   Subscription,
   SignOut,

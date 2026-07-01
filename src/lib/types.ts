@@ -445,6 +445,14 @@ export type SignInWithOAuthConnection = {
  * authorize URL on success (useful when `skipBrowserRedirect: true` so you
  * can drive the navigation yourself) or an {@link AuthError} on failure.
  */
+/**
+ * Result of {@link FaableAuthClient.signInWithOauthConnection}. A precise
+ * variant of {@link AuthResult} — the same never-throw contract applies.
+ *
+ * Note: on the browser redirect success path the method's promise does not
+ * resolve at all (the page is navigating away), so this value is only observed
+ * when `skipBrowserRedirect: true` or in non-navigating runtimes.
+ */
 export type OAuthResponse =
   | {
       data: {
@@ -498,8 +506,32 @@ export interface Session {
 }
 
 /**
+ * The uniform result shape every asynchronous method on
+ * {@link FaableAuthClient} resolves to.
+ *
+ * **The whole client follows one error contract: methods never throw for
+ * expected failures — they resolve with the error in `error`.** On success
+ * `error` is `null` and `data` holds the payload; on failure `data` is `null`
+ * and `error` is an {@link AuthError}. Always check `error` before reading
+ * `data`. The only thing that throws is `createClient` itself (missing
+ * `domain`/`clientId` — a programming error, not a runtime one).
+ *
+ * If you prefer throw-style control flow, wrap a call in {@link unwrap} instead
+ * of hand-writing `if (error) throw error`.
+ *
+ * `AuthResponse` and `OAuthResponse` are the two richer, discriminated variants
+ * of this same contract.
+ */
+export type AuthResult<Data = unknown> = {
+  data: Data | null
+  error: AuthError | null
+}
+
+/**
  * Discriminated union returned by every sign-in / set-session / refresh
  * method. Always check `error` first — `data` fields are `null` on failure.
+ * A precise variant of {@link AuthResult}; the same never-throw contract
+ * applies.
  */
 export type AuthResponse =
   | {

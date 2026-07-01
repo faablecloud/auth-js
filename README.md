@@ -149,6 +149,46 @@ await auth.signOut() // global — all sessions for this user
 await auth.signOut({ scope: 'local' }) // only this device
 ```
 
+## Error handling
+
+The client has **one error contract, applied uniformly**: every asynchronous
+method resolves with `{ data, error }` and **never throws for an expected
+failure** (bad credentials, wrong OTP, missing session, network error…). On
+success `error` is `null`; on failure `data` is `null` and `error` is an
+`AuthError`. Always check `error` before reading `data`:
+
+```ts
+const { data, error } = await auth.signInWithOtp({ username, otp })
+if (error) {
+  showError(error.message)
+  return
+}
+useSession(data.session)
+```
+
+The only thing that throws is `createClient` itself, and only for a
+misconfiguration (missing `domain` / `clientId`) — a programming error you fix
+once, not a runtime condition to catch.
+
+This applies to `signInWithOauthConnection`, `signInWithUsernamePassword`,
+`signUp`, `signInWithOtp`, `signInWithPasswordless`, `changePassword`,
+`changeEmail`, `signOut`, `getSession`, `setSession`, `refreshSession`,
+`initialize` and `handleRedirectCallback`. Their return types (`AuthResult<T>`,
+`AuthResponse`, `OAuthResponse`) are all variants of the same shape.
+
+### Prefer throw-style? Use `unwrap`
+
+If your code path would rather let errors propagate (a server handler, a
+`try/catch`, a wrapper that normalizes everything to throws), wrap the call in
+`unwrap` instead of hand-writing `if (error) throw error`:
+
+```ts
+import { unwrap } from '@faable/auth-js'
+
+// returns data on success, throws the AuthError on failure
+const { session } = unwrap(await auth.signInWithOtp({ username, otp }))
+```
+
 ## Sessions and state changes
 
 ```ts
