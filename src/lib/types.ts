@@ -586,6 +586,16 @@ export type InitializeResult = {
    * round-tripped through the flow so the callback page can navigate there.
    */
   returnTo?: string | null
+  /**
+   * `true` when the callback that was just consumed created a brand-new
+   * account (the auth server appended `?signup=true` to the redirect). Use it
+   * to branch into onboarding / welcome UX or fire a signup analytics event.
+   *
+   * Only social / OAuth logins signal this today — passwordless and
+   * username/password callbacks always report `false`. Absent when no sign-in
+   * redirect was consumed (session recovered from storage).
+   */
+  is_new_user?: boolean
 }
 
 export type UserResponse =

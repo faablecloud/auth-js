@@ -4,6 +4,7 @@ import { buildAndSubmitForm, resolveResponseType } from './lib/auth_helpers'
 import { BroadcastSync } from './lib/broadcast_sync'
 import { EXPIRY_MARGIN, STORAGE_KEY } from './lib/constants'
 import {
+  AuthApiError,
   AuthError,
   AuthImplicitGrantRedirectError,
   AuthInvalidTokenResponseError,
@@ -333,7 +334,7 @@ export class FaableAuthClient extends Base {
           return { error }
         }
 
-        const { session, redirectType, returnTo } = data
+        const { session, redirectType, returnTo, is_new_user } = data
 
         this._debug(
           '#_initialize()',
@@ -353,7 +354,7 @@ export class FaableAuthClient extends Base {
           }
         }, 0)
 
-        return { error: null, redirectType, returnTo }
+        return { error: null, redirectType, returnTo, is_new_user }
       }
       // no login attempt via callback url try to recover session from storage
       await this._recoverAndRefresh()
@@ -384,16 +385,26 @@ export class FaableAuthClient extends Base {
           session: Session
           redirectType: string | null
           returnTo: string | null
+          is_new_user: boolean
         }
         error: null
       }
     | {
-        data: { session: null; redirectType: null; returnTo: null }
+        data: {
+          session: null
+          redirectType: null
+          returnTo: null
+          is_new_user: false
+        }
         error: AuthError
       }
   > {
     try {
       const params = parseParametersFromURL(window?.location.href)
+      // The auth server appends `?signup=true` to the callback when the login
+      // just created a new account (social/OAuth only). Surface it so the app
+      // can branch into onboarding; strip it from the URL alongside the tokens.
+      const is_new_user = params.signup === 'true'
       if (flow == 'pkce') {
         if (!params.code) {
           throw new AuthPKCEGrantCodeExchangeError('No code detected.')
@@ -402,14 +413,15 @@ export class FaableAuthClient extends Base {
         const { data, error } = await this._exchangeCodeForSession(params.code)
         if (error) throw error
 
-        // Remove code from URL
-        clearURLParameters(['code'])
+        // Remove code (and the signup marker) from URL
+        clearURLParameters(['code', 'signup'])
 
         return {
           data: {
             session: data.session,
             redirectType: data.redirectType,
-            returnTo: data.returnTo
+            returnTo: data.returnTo,
+            is_new_user
           },
           error: null
         }
@@ -481,19 +493,30 @@ export class FaableAuthClient extends Base {
         'expires_in',
         'refresh_token',
         'token_type',
-        'scope'
+        'scope',
+        'signup'
       ])
       this._debug('#_getSessionFromURL()', 'clearing window.location.hash')
 
       return {
-        data: { session, redirectType: params.type, returnTo: null },
+        data: {
+          session,
+          redirectType: params.type,
+          returnTo: null,
+          is_new_user
+        },
         error: null
       }
     } catch (error) {
       this._debug(error)
       if (isAuthError(error)) {
         return {
-          data: { session: null, redirectType: null, returnTo: null },
+          data: {
+            session: null,
+            redirectType: null,
+            returnTo: null,
+            is_new_user: false
+          },
           error
         }
       }
@@ -1085,6 +1108,104 @@ export class FaableAuthClient extends Base {
   }
 
   /**
+   * Registers a new user against the tenant's database connection with an
+   * email + password, then signs them in — so an email/password signup form
+   * can live entirely in the browser with no backend of your own.
+   *
+   * This calls the public `POST /dbconnections/signup` endpoint (the Faable
+   * analogue of Auth0's `/dbconnections/signup`) which creates the user and
+   * its credential in one step, then chains
+   * {@link FaableAuthClient.signInWithUsernamePassword} to establish the
+   * session.
+   *
+   * **Auto-login navigates the browser.** Like every interactive
+   * username/password login in this SDK, the sign-in step submits a form that
+   * round-trips through the auth server, so on success the page redirects to
+   * your `redirectTo` and the live session is delivered there by
+   * {@link FaableAuthClient.initialize} (and a `SIGNED_IN` event). This method
+   * only returns synchronously when signup itself fails, or in non-navigating
+   * runtimes (e.g. tests).
+   *
+   * The user is created with `email_verified: false`; any verification /
+   * welcome email is driven by the tenant's account settings.
+   *
+   * @param data The new user's email, password and optional profile fields.
+   * @example
+   * ```ts
+   * const { error } = await auth.signUp({
+   *   email: 'user@example.com',
+   *   password: '••••••••',
+   *   name: 'Ada Lovelace',
+   *   redirectTo: 'https://app.example.com/callback'
+   * })
+   * if (error) showError(error.message) // e.g. 'email_taken', 'signup_disabled'
+   * // otherwise the browser is already navigating to complete the login
+   * ```
+   * @see {@link https://faable.com/docs/auth/connections | Connections}
+   * @category Sign in
+   */
+  async signUp(data: {
+    email: string
+    password: string
+    name?: string
+    given_name?: string
+    family_name?: string
+    user_metadata?: Record<string, unknown>
+    connection?: string
+    redirectTo?: string
+    state?: string
+    audience?: string
+  }): Promise<{ data: null; error: AuthError | null }> {
+    if (!data?.email || !data?.password) {
+      return {
+        data: null,
+        error: new AuthUnknownError('email and password are required', null)
+      }
+    }
+
+    const { data: body, error } = await _post(
+      `${this.domainUrl}/dbconnections/signup`,
+      {
+        client_id: this.clientId,
+        email: data.email,
+        password: data.password,
+        ...(data.name ? { name: data.name } : {}),
+        ...(data.given_name ? { given_name: data.given_name } : {}),
+        ...(data.family_name ? { family_name: data.family_name } : {}),
+        ...(data.user_metadata ? { user_metadata: data.user_metadata } : {}),
+        ...(data.connection ? { connection: data.connection } : {})
+      }
+    )
+
+    if (error) {
+      // `_post` hands back the server's `{ status, message }` body as `data`
+      // and its `message` as `error`. Map the HTTP status to a stable
+      // ErrorCode so callers can branch without string-matching the message.
+      const status = (body as any)?.status as number | undefined
+      const code =
+        status === 403
+          ? 'signup_disabled'
+          : status === 409
+            ? 'email_exists'
+            : undefined
+      return {
+        data: null,
+        error: new AuthApiError(String(error), status ?? 500, code)
+      }
+    }
+
+    // Auto-login through the standard redirect flow (no ROPC grant exists for
+    // database connections, so this is the same path a manual login takes).
+    return this.signInWithUsernamePassword({
+      username: data.email,
+      password: data.password,
+      redirectTo: data.redirectTo,
+      state: data.state,
+      audience: data.audience
+    })
+  }
+
+  /**
    * Completes a passwordless login by exchanging an OTP code for a session.
    *
    * Pair this with {@link FaableAuthClient.signInWithPasswordless} called
@@ -1220,6 +1341,75 @@ export class FaableAuthClient extends Base {
     const { data, error } = await _post(
       `${this.domainUrl}/dbconnections/change_password`,
       { email: params.email }
+    )
+    return {
+      data: data ?? null,
+      error: error ? new AuthUnknownError(String(error), error) : null
+    }
+  }
+
+  /**
+   * Starts a verified email change for the currently signed-in user.
+   *
+   * The user must be authenticated — the call is made with the session's
+   * access token, and the auth server only lets a user change their own
+   * email. It creates a verification ticket and emails the user; the change
+   * is applied only after they click the link, which the server handles and
+   * then redirects to `redirect_uri`. The current session is unaffected until
+   * then.
+   *
+   * @param params The new email plus optional verification policy.
+   *   - `verification_mode`: `'new_only'` verifies just the new address;
+   *     `'old_and_new'` also requires confirming from the old one. When
+   *     omitted the account's default policy applies.
+   *   - `redirect_uri`: where the server sends the user after they verify.
+   * @example
+   * ```ts
+   * const { data, error } = await auth.changeEmail({
+   *   new_email: 'new@example.com',
+   *   redirect_uri: 'https://app.example.com/account'
+   * })
+   * // data: { status: 'verification_sent', ticket_id, verification_mode }
+   * ```
+   * @see {@link https://faable.com/docs/auth/change-email | Change Email}
+   * @category Account
+   */
+  async changeEmail(params: {
+    new_email: string
+    verification_mode?: 'new_only' | 'old_and_new'
+    redirect_uri?: string
+  }): Promise<{ data: unknown; error: AuthError | null }> {
+    if (!params?.new_email) {
+      return {
+        data: null,
+        error: new AuthUnknownError('new_email is required', null)
+      }
+    }
+
+    const { data: sessionData, error: sessionError } = await this.getSession()
+    const session = sessionData?.session
+    if (sessionError || !session) {
+      return {
+        data: null,
+        error: sessionError || new AuthSessionMissingError()
+      }
+    }
+
+    const user_id = session.user?.sub
+    if (!user_id) {
+      return { data: null, error: new AuthSessionMissingError() }
+    }
+
+    const { data, error } = await _post(
+      `${this.domainUrl}/user/${user_id}/change-email`,
+      {
+        new_email: params.new_email,
+        ...(params.verification_mode
+          ? { verification_mode: params.verification_mode }
+          : {}),
+        ...(params.redirect_uri ? { redirect_uri: params.redirect_uri } : {})
+      },
+      { token: session.access_token }
     )
     return {
       data: data ?? null,
