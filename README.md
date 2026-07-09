@@ -314,24 +314,70 @@ createClient({ domain, clientId, storage: memoryStorage })
 
 ## Next.js / server-side
 
-Use cookie storage on the client, then read the session from `next/headers` on
-the server:
+Use `storage: 'cookie'` on the client, then read the session on the server with
+`getSessionFromCookies`. It returns the full `Session` (`access_token`,
+`refresh_token`, `expires_at`, `user`) or `null`, and accepts the `cookies()`
+object from `next/headers`, a `NextRequest.cookies` object, or a plain
+`{ name: value }` map.
+
+`getSessionFromCookies` is **async** — always `await` it. In Next.js 15+,
+`cookies()` is also async, so `await` that too:
 
 ```ts
-// app/page.tsx
+// app/page.tsx (Next.js 15+)
 import { cookies } from 'next/headers'
 import { getSessionFromCookies } from '@faable/auth-js'
 
 export default async function Page() {
-  const session = getSessionFromCookies(cookies(), { clientId: '<client_id>' })
+  const session = await getSessionFromCookies(await cookies(), {
+    clientId: '<client_id>'
+  })
   if (!session) return <SignIn />
   return <Dashboard user={session.user} />
 }
 ```
 
+On Next.js 14 and earlier `cookies()` is synchronous — drop the inner `await`
+(`await getSessionFromCookies(cookies(), …)`).
+
+### Gating routes in middleware (Edge)
+
+To keep protected content from ever reaching the browser without a session, gate
+it in `middleware.ts`. Pass `req.cookies` (a `NextRequest.cookies` object)
+directly:
+
+```ts
+// middleware.ts
+import { NextRequest, NextResponse } from 'next/server'
+import { getSessionFromCookies } from '@faable/auth-js'
+
+export async function middleware(req: NextRequest) {
+  const session = await getSessionFromCookies(req.cookies, {
+    clientId: '<client_id>'
+  })
+  if (!session) return NextResponse.redirect(new URL('/login', req.url))
+  return NextResponse.next()
+}
+
+export const config = { matcher: ['/((?!login|_next|favicon.ico).*)'] }
+```
+
 Pass the same `clientId` you used in `createClient`. If you also passed a custom
 `storageKey` to `createClient`, mirror it here as `{ clientId, storageKey }` so
 the helper looks at the same cookie.
+
+> **Security note.** This library writes the session cookie from JavaScript, so
+> it **cannot** be `HttpOnly` — an XSS can read the `access_token`. Treat XSS
+> prevention (CSP, escaping) as a hard requirement. The cookie may also be
+> **chunked** across `faableauth-<clientId>.0`, `.1`, … when large;
+> `getSessionFromCookies` reassembles the chunks for you, but any code that
+> reads the cookie by hand (another backend, an edge worker) must rejoin them.
+
+> **`returnTo` vs `redirectTo`.** Don't embed `returnTo` inside the `redirectTo`
+> query (e.g. `redirectTo: '/callback?returnTo=/x'`) — pass `returnTo` as its
+> own option (`signInWith…({ returnTo: '/x' })`). The SDK stores it locally next
+> to the PKCE verifier and round-trips it back to you; keep `redirectTo` a clean
+> URL with no query.
 
 ## Documentation
 
