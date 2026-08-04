@@ -2236,6 +2236,10 @@ export class FaableAuthClient extends Base {
       // Non-redirect path (opted out, non-global scope, or non-browser):
       // best-effort cross-origin call to revoke server-side tokens. Send
       // credentials so it can clear the cookie when app + auth share a site.
+      // Whatever it returns, the LOCAL teardown below must still run — a
+      // CORS-blocked or unreachable /logout must never leave the user
+      // visibly signed in.
+      let revokeError: AuthError | null = null
       const accessToken = data.session?.access_token
       if (accessToken) {
         const { error } = await this.api.signOut({
@@ -2243,15 +2247,17 @@ export class FaableAuthClient extends Base {
           credentials: 'include'
         })
         if (error) {
-          // ignore 404s since user might not exist anymore
-          // ignore 401s since an invalid or expired JWT should sign out the current session
+          // Surface only real API rejections, and even those AFTER the local
+          // teardown. Swallowed entirely: network/CORS failures (cross-site
+          // /logout is expected to be blocked — the redirect flow is the
+          // robust path), 404s (user might not exist anymore) and 401s (an
+          // invalid or expired JWT should sign out the current session).
           if (
-            !(
-              isAuthApiError(error) &&
-              (error.status === 404 || error.status === 401)
-            )
+            isAuthApiError(error) &&
+            error.status !== 404 &&
+            error.status !== 401
           ) {
-            return { error }
+            revokeError = error
           }
         }
       }
@@ -2260,7 +2266,7 @@ export class FaableAuthClient extends Base {
         await this.storage.removeItem(`${this.storageKey}-code-verifier`)
         await this._notifyAllSubscribers('SIGNED_OUT', null)
       }
-      return { error: null }
+      return { error: revokeError }
     })
   }
 
