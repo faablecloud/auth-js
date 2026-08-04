@@ -5,6 +5,10 @@ import {
 } from './FaableAuthClient'
 import { createClient } from './createClient'
 import { AuthError } from './lib/errors'
+import type {
+  LastUsedLoginMethod,
+  LastUsedLoginMethodKind
+} from './lib/last_used_storage'
 import { Session, User } from './lib/types'
 import type {
   AuthChangeEvent,
@@ -13,6 +17,7 @@ import type {
   AuthResult,
   CookieOptions,
   FaableAuthClientConfig,
+  LastUsedCookieOptions,
   OAuthResponse,
   Provider,
   SignInWithOAuthConnection,
@@ -43,6 +48,9 @@ export type {
   SignOut,
   SupportedStorage,
   CookieOptions,
+  LastUsedCookieOptions,
+  LastUsedLoginMethod,
+  LastUsedLoginMethodKind,
   OAuthResponse,
   AuthFlowType,
   Provider

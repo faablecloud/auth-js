@@ -294,6 +294,21 @@ export interface CookieOptions {
 }
 
 /**
+ * Attribute overrides for the "last used login method" hint cookie written
+ * after a confirmed login (see `FaableAuthClient.getLastUsedLoginMethod`).
+ *
+ * Independent from {@link CookieOptions} on purpose: setting `cookieOptions`
+ * switches the whole session storage to cookies, while this only affects the
+ * dedicated hint cookie.
+ */
+export interface LastUsedCookieOptions {
+  /** (Optional) Cookie domain. Use a leading dot to share the hint across subdomains, e.g. `.example.com`. */
+  domain?: string
+  /** (Optional) Cookie lifetime in seconds. Defaults to 180 days. */
+  maxAge?: number
+}
+
+/**
  * Configuration accepted by {@link createClient} and the
  * `FaableAuthClient` constructor.
  *
@@ -342,6 +357,13 @@ export type FaableAuthClientConfig = {
    * is not required when you only want to tweak attributes.
    */
   cookieOptions?: CookieOptions
+
+  /**
+   * (Optional) Attribute overrides for the "last used login method" hint
+   * cookie. Pass `{ domain: '.example.com' }` to make the hint visible across
+   * subdomains. Does not affect where the session itself is stored.
+   */
+  lastUsedCookie?: LastUsedCookieOptions
 
   /**
    * Provide your own locking mechanism based on the environment. By default no locking is done at this time.

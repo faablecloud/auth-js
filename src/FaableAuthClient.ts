@@ -29,6 +29,14 @@ import {
 } from './lib/helpers'
 import { windowHelpers } from './lib/helpers/window'
 import { decodeJWTPayload, expiryFromAccessToken } from './lib/jwt'
+import {
+  LastUsedLoginMethod,
+  LastUsedLoginMethodKind,
+  consumeLoginAttempt,
+  loadLastUsedMethod,
+  saveLastUsedMethod,
+  saveLoginAttempt
+} from './lib/last_used_storage'
 import { getSessionFromCookies } from './lib/nextjs'
 import { loadCodeVerifier } from './lib/pkce_storage'
 import { isValidSession } from './lib/session_helpers'
@@ -40,6 +48,7 @@ import {
   AuthResult,
   CallRefreshTokenResult,
   InitializeResult,
+  LastUsedCookieOptions,
   OAuthResponse,
   SignInWithOAuthConnection,
   Subscription,
@@ -132,6 +141,9 @@ export class FaableAuthClient extends Base {
    */
   protected flowType: AuthFlowType
 
+  /** Attribute overrides for the "last used login method" hint cookie. */
+  protected lastUsedCookie?: LastUsedCookieOptions
+
   protected lock: Lock
 
   /**
@@ -194,6 +206,8 @@ export class FaableAuthClient extends Base {
     )
 
     this.flowType = config.flowType ?? (isBrowser() ? 'pkce' : 'implicit')
+
+    this.lastUsedCookie = config.lastUsedCookie
 
     this.autoRefreshToken = true
 
@@ -417,6 +431,8 @@ export class FaableAuthClient extends Base {
         // Remove code (and the signup marker) from URL
         clearURLParameters(['code', 'signup'])
 
+        await this._promoteLoginAttempt()
+
         return {
           data: {
             session: data.session,
@@ -498,6 +514,8 @@ export class FaableAuthClient extends Base {
         'signup'
       ])
       this._debug('#_getSessionFromURL()', 'clearing window.location.hash')
+
+      await this._promoteLoginAttempt()
 
       return {
         data: {
@@ -1115,6 +1133,8 @@ export class FaableAuthClient extends Base {
         )
       }
     }
+    // The form below navigates the page; record the attempt while we still can.
+    await this._saveLoginAttempt({ method: 'password' })
     buildAndSubmitForm(rawAuthResponse.data, document)
     return { data: null, error: null }
   }
@@ -1281,6 +1301,10 @@ export class FaableAuthClient extends Base {
     session.user = user
     await this._saveSession(session)
     await this._notifyAllSubscribers('SIGNED_IN', session)
+
+    // OTP is the one interactive flow that establishes the session in-page,
+    // so the confirmed method is recorded directly (no attempt/promotion).
+    this._recordLastUsedMethod({ method: 'otp' })
 
     return {
       data: { user: session.user, session },
@@ -1586,6 +1610,14 @@ export class FaableAuthClient extends Base {
 
     this._debug('#_handleConnectionSignIn()', 'options', options, 'url', url)
 
+    // Must happen before the redirect below: the promise never resolves on
+    // the navigation path, so there is no "after".
+    await this._saveLoginAttempt({
+      method: 'oauth',
+      connection: options.connection,
+      connection_id: options.connection_id
+    })
+
     // try to open on the browser
     if (isBrowser() && !options.skipBrowserRedirect) {
       window?.location.assign(url)
@@ -1600,6 +1632,81 @@ export class FaableAuthClient extends Base {
     }
 
     return { data: { url }, error: null }
+  }
+
+  /**
+   * Best-effort write of a pending login attempt. A storage failure must
+   * never break the sign-in itself, so errors are only logged.
+   */
+  private async _saveLoginAttempt(attempt: {
+    method: LastUsedLoginMethodKind
+    connection?: string
+    connection_id?: string
+  }): Promise<void> {
+    try {
+      await saveLoginAttempt(this.storage, this.storageKey, attempt)
+    } catch (error) {
+      this._debug('#_saveLoginAttempt()', 'failed', error)
+    }
+  }
+
+  /**
+   * Promotes the pending login attempt (if any) to the confirmed last-used
+   * record. Called from the callback path once a session was established;
+   * a login started elsewhere (other tab, other device) leaves no attempt
+   * and records nothing.
+   */
+  private async _promoteLoginAttempt(): Promise<void> {
+    try {
+      const attempt = await consumeLoginAttempt(this.storage, this.storageKey)
+      if (!attempt) return
+      this._recordLastUsedMethod(attempt)
+    } catch (error) {
+      this._debug('#_promoteLoginAttempt()', 'failed', error)
+    }
+  }
+
+  /** Best-effort write of the confirmed last-used method cookie. */
+  private _recordLastUsedMethod(record: {
+    method: LastUsedLoginMethodKind
+    connection?: string
+    connection_id?: string
+  }): void {
+    try {
+      saveLastUsedMethod(
+        this.storageKey,
+        { ...record, at: Date.now() },
+        this.lastUsedCookie
+      )
+    } catch (error) {
+      this._debug('#_recordLastUsedMethod()', 'failed', error)
+    }
+  }
+
+  /**
+   * Returns the login method the user last *completed* on this browser, or
+   * `null` when none was recorded — for login UIs that want to show a
+   * PostHog-style "Last used" hint next to the matching sign-in button.
+   *
+   * A method is recorded only when the login actually establishes a session
+   * (the OAuth/password redirect round-trip finishing, or an OTP exchange
+   * succeeding); a clicked button whose flow was abandoned or failed leaves
+   * no trace. The record survives {@link FaableAuthClient.signOut} on
+   * purpose and lives in a dedicated cookie, so it can be shared across
+   * subdomains via the `lastUsedCookie.domain` client config.
+   *
+   * @returns The last confirmed method (`oauth` logins carry the
+   *   `connection` / `connection_id` they were started with) or `null`.
+   * @example
+   * ```ts
+   * const last = await auth.getLastUsedLoginMethod()
+   * if (last?.method === 'oauth') highlight(last.connection_id)
+   * ```
+   * @see {@link https://faable.com/docs/auth/connections | Connections}
+   * @category Sign in
+   */
+  async getLastUsedLoginMethod(): Promise<LastUsedLoginMethod | null> {
+    return loadLastUsedMethod(this.storageKey)
   }
 
   /**

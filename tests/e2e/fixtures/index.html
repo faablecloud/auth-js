@@ -34,6 +34,9 @@
         async signOut() {
           return window.__client.signOut({ scope: 'local' })
         },
+        async getLastUsedLoginMethod() {
+          return window.__client.getLastUsedLoginMethod()
+        },
         async refreshSession() {
           return window.__client.refreshSession()
         },
