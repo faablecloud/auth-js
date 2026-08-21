@@ -116,6 +116,20 @@ export class FaableAuthClient extends Base {
   protected _lastInitializeResult: InitializeResult | null = null
   protected detectSessionInUrl = true
 
+  /**
+   * Error the auth server returned via redirect (`?error=...&
+   * error_description=...`, RFC 6749 §4.1.2.1) on the page we initialized
+   * on. Held for one {@link getRedirectError} read: the promise returned by
+   * `signInWithOauthConnection` dies with the top-level navigation, so
+   * without this stash a server-side deny is invisible to the app
+   * (2026-08-21: ten silent "Connect GitHub" retries).
+   */
+  protected redirectError: {
+    error: string
+    error_description: string
+    error_code?: string
+  } | null = null
+
   protected storageKey: string
 
   protected clientId: string
@@ -342,6 +356,20 @@ export class FaableAuthClient extends Base {
             return { error }
           }
 
+          // A server-returned error redirect (`?error=...`) is a failed
+          // ATTEMPT, not a corrupted session. The user may be signed in and
+          // merely failed a connect/link round-trip (2026-08-21: a GitHub
+          // connect denied by the network gate); nuking their session here
+          // turned a failed connect into a logout. `details` is only set on
+          // the error-params throw — the missing-token variants keep the
+          // legacy removal below.
+          if (
+            error instanceof AuthImplicitGrantRedirectError &&
+            error.details
+          ) {
+            return { error }
+          }
+
           // failed login attempt via url,
           // remove old session as in verifyOtp, signUp and signInWith*
           await this._removeSession()
@@ -445,6 +473,19 @@ export class FaableAuthClient extends Base {
       }
 
       if (params.error || params.error_description || params.error_code) {
+        // Server-returned error redirect (RFC 6749 §4.1.2.1): stash it for a
+        // one-shot getRedirectError() read and strip the params so a reload
+        // doesn't replay the failure. The throw below surfaces it to
+        // _initialize, which deliberately KEEPS any existing session — this
+        // redirect may come from a connect/link attempt by a signed-in user.
+        this.redirectError = {
+          error: params.error || 'unspecified_error',
+          error_description:
+            params.error_description ||
+            'Error in URL with unspecified error_description',
+          error_code: params.error_code
+        }
+        clearURLParameters(['error', 'error_description', 'error_code'])
         throw new AuthImplicitGrantRedirectError(
           params.error_description ||
             'Error in URL with unspecified error_description',
@@ -1080,6 +1121,48 @@ export class FaableAuthClient extends Base {
   }
 
   /**
+   * Links an additional OAuth identity (e.g. GitHub) to the CURRENTLY
+   * signed-in user — the identity round-trip proves control of the provider
+   * account and attaches it to the session user; it never signs in, never
+   * creates a user, and never touches the user's email or profile.
+   *
+   * This is NOT {@link signInWithOauthConnection}: a sign-in with an unknown
+   * provider identity creates a brand-new user, which is exactly the
+   * duplicate-account hole "connect" buttons used to fall into. Requires an
+   * active session (the server returns `error=login_required` otherwise) and
+   * must not be combined with `prompt: 'login'` (it would destroy the
+   * session being linked to).
+   *
+   * On failure the server redirects back with `?error=...` — read it with
+   * {@link getRedirectError} after the round-trip.
+   *
+   * @example
+   * ```ts
+   * await auth.linkOauthConnection({
+   *   connection_id: GITHUB_CONNECTION_ID,
+   *   redirectTo: window.location.href
+   * })
+   * ```
+   * @see {@link https://faable.com/docs/auth/connections | Connections}
+   * @category Sign in
+   */
+  async linkOauthConnection(
+    credentials: SignInWithOAuthConnection
+  ): Promise<OAuthResponse> {
+    return await this._handleConnectionSignIn({
+      connection: credentials.connection,
+      connection_id: credentials.connection_id,
+      redirectTo: credentials?.redirectTo,
+      returnTo: credentials?.returnTo,
+      scopes: credentials?.scopes,
+      queryParams: credentials.queryParams,
+      skipBrowserRedirect: credentials.skipBrowserRedirect,
+      audience: credentials.audience,
+      link: true
+    })
+  }
+
+  /**
    * Signs the user in with a username + password against a database
    * connection on the tenant.
    *
@@ -1593,6 +1676,10 @@ export class FaableAuthClient extends Base {
     queryParams?: { [key: string]: string }
     skipBrowserRedirect?: boolean
     audience?: string
+    // Link mode: `/authorize?link=true` attaches the resulting identity to
+    // the ACTIVE session user instead of signing in/up. See
+    // linkOauthConnection().
+    link?: boolean
   }) {
     const url: string = await this._getUrlForConnection(
       `${this.domainUrl}/authorize`,
@@ -1603,7 +1690,9 @@ export class FaableAuthClient extends Base {
         redirectTo: options.redirectTo,
         returnTo: options.returnTo,
         scopes: options.scopes,
-        queryParams: options.queryParams,
+        queryParams: options.link
+          ? { ...(options.queryParams ?? {}), link: 'true' }
+          : options.queryParams,
         audience: options.audience
       }
     )
@@ -1611,12 +1700,16 @@ export class FaableAuthClient extends Base {
     this._debug('#_handleConnectionSignIn()', 'options', options, 'url', url)
 
     // Must happen before the redirect below: the promise never resolves on
-    // the navigation path, so there is no "after".
-    await this._saveLoginAttempt({
-      method: 'oauth',
-      connection: options.connection,
-      connection_id: options.connection_id
-    })
+    // the navigation path, so there is no "after". Skipped in link mode: a
+    // connect round-trip is not how the user signs in, so it must not flip
+    // the "last used login method" hint.
+    if (!options.link) {
+      await this._saveLoginAttempt({
+        method: 'oauth',
+        connection: options.connection,
+        connection_id: options.connection_id
+      })
+    }
 
     // try to open on the browser
     if (isBrowser() && !options.skipBrowserRedirect) {
@@ -1770,6 +1863,37 @@ export class FaableAuthClient extends Base {
     })
 
     return result
+  }
+
+  /**
+   * Error the auth server returned via redirect on the current page load
+   * (`?error=access_denied&error_description=...`, RFC 6749 §4.1.2.1), or
+   * `null` when the page wasn't reached through a failed auth round-trip.
+   *
+   * Consume-once: the first read clears it (and the params were already
+   * stripped from the URL at initialization), so a later router navigation
+   * can't re-show a stale failure. Exists because the promise returned by
+   * {@link signInWithOauthConnection} dies with the top-level navigation —
+   * this is the only place the app can learn WHY the round-trip failed
+   * (e.g. an action deny like "Signups from this network are currently
+   * restricted").
+   *
+   * @example
+   * ```ts
+   * const redirectError = await auth.getRedirectError()
+   * if (redirectError) showAlert(redirectError.error_description)
+   * ```
+   * @category Sessions
+   */
+  async getRedirectError(): Promise<{
+    error: string
+    error_description: string
+    error_code?: string
+  } | null> {
+    await this.initializePromise
+    const err = this.redirectError
+    this.redirectError = null
+    return err
   }
 
   /**
