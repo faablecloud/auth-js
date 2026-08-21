@@ -363,10 +363,33 @@ export class FaableAuthClient extends Base {
           // turned a failed connect into a logout. `details` is only set on
           // the error-params throw — the missing-token variants keep the
           // legacy removal below.
+          //
+          // Matched by `name`, NOT by instanceof: the published CJS bundle is
+          // ES5, where subclassing Error breaks the prototype chain — at
+          // runtime `constructor.name` is 'Error' and instanceof is false
+          // even for an error this very bundle constructed (v2.3.0 shipped
+          // the instanceof form and kept logging users out). Same reason the
+          // identity-linked workaround above matches on `message`.
           if (
-            error instanceof AuthImplicitGrantRedirectError &&
-            error.details
+            error?.name === 'AuthImplicitGrantRedirectError' &&
+            (error as AuthImplicitGrantRedirectError).details
           ) {
+            // This early return skips the storage recovery at the bottom of
+            // the flow — load the persisted session into memory here so the
+            // signed-in user still LOOKS signed in for this page load.
+            await this._recoverAndRefresh()
+            return { error }
+          }
+
+          // The URL no longer carries any auth-flow artifacts: whatever we
+          // just failed to process was already consumed — typically by a
+          // second client instance on the same page that stripped the params
+          // between our flow detection and the parse (both straddle an
+          // await). That is a stale read, not a failed login; removing the
+          // session here logged the user out for a URL that no longer says
+          // anything. Recover storage like a normal page load instead.
+          if ((await this._detectFlowType()) === null) {
+            await this._recoverAndRefresh()
             return { error }
           }
 
