@@ -131,6 +131,16 @@ export function createMockServer() {
     res.redirect(url.toString())
   })
 
+  // RFC 6749 §5.2 is what the real /oauth/token speaks: `{ error }`, with an
+  // optional `error_description`. It never sends `message` — the shape the rest
+  // of the API uses. Mirroring that here is the point: a mock that answered
+  // `{ message }` let auth-js look like it read the reason when in production
+  // it could not see it at all.
+  const oauthError = (res, status, error, error_description) =>
+    res
+      .status(status)
+      .json({ error, ...(error_description ? { error_description } : {}) })
+
   app.post('/oauth/token', (req, res) => {
     const {
       grant_type,
@@ -151,12 +161,12 @@ export function createMockServer() {
 
     if (grant_type === 'authorization_code') {
       const stored = state.pkce.get(code)
-      if (!stored) return res.status(400).json({ message: 'invalid_code' })
+      if (!stored) return oauthError(res, 400, 'invalid_code')
       if (
         stored.code_challenge &&
         sha256base64url(code_verifier) !== stored.code_challenge
       ) {
-        return res.status(400).json({ message: 'bad_code_verifier' })
+        return oauthError(res, 400, 'bad_code_verifier')
       }
       state.pkce.delete(code)
       return res.json(
@@ -167,7 +177,7 @@ export function createMockServer() {
     if (grant_type === 'refresh_token') {
       const user = state.refreshables.get(refresh_token)
       if (!user) {
-        return res.status(400).json({ message: 'invalid_refresh_token' })
+        return oauthError(res, 400, 'invalid_refresh_token')
       }
       state.refreshables.delete(refresh_token)
       return res.json(issueSession(user))
@@ -176,13 +186,13 @@ export function createMockServer() {
     if (grant_type === 'http://auth0.com/oauth/grant-type/passwordless/otp') {
       const expected = state.otps.get(username)
       if (!expected || expected !== otp) {
-        return res.status(400).json({ message: 'invalid_otp' })
+        return oauthError(res, 400, 'Invalid or expired OTP')
       }
       state.otps.delete(username)
       return res.json(issueSession({ sub: 'otp-user', email: username }))
     }
 
-    res.status(400).json({ message: 'unsupported_grant_type' })
+    oauthError(res, 400, 'unsupported_grant_type')
   })
 
   app.get('/me', (req, res) => {

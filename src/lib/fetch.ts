@@ -34,15 +34,51 @@ const headers = (init: Partial<RequestInitWithToken> = {}) => {
   }
 }
 
+/**
+ * Human-readable reason out of an error body, across the two shapes this API
+ * speaks.
+ *
+ * `/oauth/token` answers RFC 6749 §5.2: `{ error, error_description? }`, where
+ * `error` is the OAuth code — or the message itself when the thrower set no
+ * code. Everything else answers the http-errors shape:
+ * `{ statusCode, error: 'Unauthorized', message }`.
+ *
+ * Reading `message` alone (as this did) meant the token endpoint's reason was
+ * ALWAYS dropped: a rejected OTP arrives as `{"error":"Invalid or expired
+ * OTP"}` and produced no error at all. `error` is read last on purpose — in the
+ * http-errors shape it holds the status name, which is noise next to `message`.
+ */
+const _errorMessage = (body: unknown): string | undefined => {
+  if (typeof body === 'string') return body || undefined
+  if (!body || typeof body !== 'object') return undefined
+  const b = body as Record<string, unknown>
+  for (const key of ['error_description', 'message', 'error']) {
+    const value = b[key]
+    if (typeof value === 'string' && value) return value
+  }
+  return undefined
+}
+
 const _handleRes = async (
   res: Response,
   options: Partial<RequestInitWithToken> = {}
 ) => {
   const body = options.raw ? await res.text() : await res.json()
   if (res.status >= 300) {
+    let parsed: unknown = body
+    if (options.raw) {
+      try {
+        parsed = JSON.parse(body)
+      } catch {
+        parsed = body
+      }
+    }
     return {
       data: body,
-      error: options.raw ? JSON.parse(body)?.message : body?.message,
+      // Never let a failed response come back with a falsy error: callers
+      // branch on it, and an empty one sends them down the success path.
+      error:
+        _errorMessage(parsed) ?? `Request failed with status ${res.status}`,
       status: res.status
     }
   }

@@ -136,7 +136,7 @@ test('signInWithOtp surfaces the server reason for a rejected code', async ({
   })
 
   expect(result.session).toBeNull()
-  expect(result.message).toBe('invalid_otp')
+  expect(result.message).toBe('Invalid or expired OTP')
   expect(result.message).not.toBe('Auth session or user missing')
   expect(result.status).toBe(400)
 })
@@ -153,12 +153,14 @@ test('signInWithOtp passes an arbitrary server refusal through untouched', async
     data: { username: 'user@example.com', otp: '123456' }
   })
   await request.post('/__seed/token_failure', {
+    // The real shape for an action deny: an OAuth code plus the human text in
+    // `error_description`. The description is what the user must read, not the
+    // machine code next to it.
     data: {
       status: 429,
       body: {
-        statusCode: 429,
-        error: 'Too Many Requests',
-        message: 'Rate limit exceeded'
+        error: 'access_denied',
+        error_description: 'Rate limit exceeded'
       }
     }
   })

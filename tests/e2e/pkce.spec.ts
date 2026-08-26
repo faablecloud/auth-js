@@ -133,9 +133,8 @@ test('a refused code exchange surfaces the server reason', async ({
     data: {
       status: 403,
       body: {
-        statusCode: 403,
-        error: 'Forbidden',
-        message: 'Signups from this network are currently restricted'
+        error: 'access_denied',
+        error_description: 'Signups from this network are currently restricted'
       }
     }
   })
