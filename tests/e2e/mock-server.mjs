@@ -20,7 +20,12 @@ function freshState() {
     sessions: new Map(), // access_token -> user
     refreshables: new Map(), // refresh_token -> user
     otps: new Map(), // username -> otp
-    audiences: { authorize: [], token: [] } // audience values seen per endpoint
+    audiences: { authorize: [], token: [] }, // audience values seen per endpoint
+    // Forces the next /oauth/token call to fail with an exact status + body,
+    // so tests can assert that a real server refusal (an action deny, a rate
+    // limit) reaches the caller verbatim instead of being flattened into a
+    // generic "session missing".
+    tokenFailure: null
   }
 }
 
@@ -73,6 +78,12 @@ export function createMockServer() {
   app.post('/__seed/otp', (req, res) => {
     const { username, otp } = req.body
     state.otps.set(username, otp)
+    res.json({ ok: true })
+  })
+
+  app.post('/__seed/token_failure', (req, res) => {
+    const { status, body } = req.body
+    state.tokenFailure = { status, body }
     res.json({ ok: true })
   })
 
@@ -131,6 +142,12 @@ export function createMockServer() {
       audience
     } = req.body
     state.audiences.token.push({ grant_type, audience: audience ?? null })
+
+    if (state.tokenFailure) {
+      const { status, body } = state.tokenFailure
+      state.tokenFailure = null
+      return res.status(status).json(body)
+    }
 
     if (grant_type === 'authorization_code') {
       const stored = state.pkce.get(code)

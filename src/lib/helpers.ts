@@ -1,3 +1,4 @@
+import { AuthApiError } from './errors'
 import { JsonResponse } from './fetch'
 import { saveCodeVerifier } from './pkce_storage'
 import { AuthResponse, SupportedStorage, User } from './types'
@@ -176,8 +177,35 @@ export function expiresAt(expiresIn: number) {
 }
 
 export function _sessionResponse({
-  data
+  data,
+  error,
+  status
 }: JsonResponse<Partial<RawAuthResponse>>): AuthResponse {
+  // Forward what the server actually said. This used to destructure `data`
+  // alone and hardcode `error: null`, which made the `if (error)` branch in
+  // every caller dead code: a 401 "Invalid or expired OTP", a 429, an action
+  // deny — all of them fell through to the generic
+  // AuthInvalidTokenResponseError ("Auth session or user missing"), so the one
+  // piece of information the user needed never reached the screen.
+  if (error) {
+    const body = (data ?? {}) as Record<string, unknown>
+    const message =
+      typeof error === 'string'
+        ? error
+        : ((error as { message?: string })?.message ?? String(error))
+    return {
+      data: { session: null, user: null },
+      // Callers read `error.message`, so the raw string the fetch layer
+      // produces has to be wrapped — a bare string would silently render as
+      // `undefined`. Fastify puts the status and the code in the error body.
+      error: new AuthApiError(
+        message,
+        status ?? (typeof body.statusCode === 'number' ? body.statusCode : 500),
+        typeof body.error === 'string' ? body.error : undefined
+      )
+    }
+  }
+
   let session = null
   if (!data) throw new Error('Bad session response')
   if (hasSession(data)) {

@@ -4,6 +4,12 @@ import { version } from './version'
 export type JsonResponse<T = any> = {
   data: T | null
   error?: any
+  /**
+   * HTTP status of the response, when there was one. Callers that turn a
+   * failed response into an AuthError need it — reading it back out of the
+   * body only works for servers that happen to echo it there.
+   */
+  status?: number
 }
 
 type RequestInitWithToken = RequestInit & {
@@ -36,10 +42,11 @@ const _handleRes = async (
   if (res.status >= 300) {
     return {
       data: body,
-      error: options.raw ? JSON.parse(body)?.message : body?.message
+      error: options.raw ? JSON.parse(body)?.message : body?.message,
+      status: res.status
     }
   }
-  return { data: body, error: null }
+  return { data: body, error: null, status: res.status }
 }
 
 export const _post = async <T>(

@@ -108,3 +108,50 @@ test('an authorization code with no stored verifier is rejected', async ({
   const session = await page.evaluate(() => window.__faable.getSession())
   expect(session).toBeNull()
 })
+
+// Same regression as the OTP one, on the other path that goes through
+// `_sessionResponse`: the social-login code exchange. A server refusal here was
+// flattened into "Auth session or user missing" too, which is why the fix and
+// this guard are not OTP-specific.
+test('a refused code exchange surfaces the server reason', async ({
+  page,
+  request
+}) => {
+  await page.goto('/')
+  await page.waitForFunction(() => typeof window.__faable !== 'undefined')
+  await page.evaluate(() => window.__faable.createClient())
+
+  const authorizeUrl = await page.evaluate(async () => {
+    const { data } = await window.__client.signInWithOauthConnection({
+      connection: 'google',
+      skipBrowserRedirect: true
+    })
+    return data.url
+  })
+
+  await request.post('/__seed/token_failure', {
+    data: {
+      status: 403,
+      body: {
+        statusCode: 403,
+        error: 'Forbidden',
+        message: 'Signups from this network are currently restricted'
+      }
+    }
+  })
+
+  await page.goto(authorizeUrl)
+  await page.waitForFunction(() => typeof window.__faable !== 'undefined')
+  await page.evaluate(() => window.__faable.createClient())
+
+  const result = await page.evaluate(() =>
+    window.__faable.handleRedirectCallback()
+  )
+
+  expect(result.hasSession).toBe(false)
+  expect(result.error?.message).toBe(
+    'Signups from this network are currently restricted'
+  )
+  expect(result.error?.message).not.toBe('Auth session or user missing')
+  expect(result.error?.status).toBe(403)
+})

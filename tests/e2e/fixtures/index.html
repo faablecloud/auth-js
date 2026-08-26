@@ -40,11 +40,28 @@
         async refreshSession() {
           return window.__client.refreshSession()
         },
+        async handleRedirectCallback() {
+          const r = await window.__client.handleRedirectCallback()
+          // Flattened here on purpose: Playwright serializes an Error across
+          // the evaluate boundary down to name/message and drops `status`.
+          return {
+            hasSession: !!r?.data?.session,
+            error: r?.error
+              ? {
+                  name: r.error.name,
+                  message: r.error.message,
+                  status: r.error.status
+                }
+              : null
+          }
+        },
         events: [],
         subscribeEvents() {
-          const { data } = window.__client.onAuthStateChange((event, session) => {
-            window.__faable.events.push({ event, hasSession: !!session })
-          })
+          const { data } = window.__client.onAuthStateChange(
+            (event, session) => {
+              window.__faable.events.push({ event, hasSession: !!session })
+            }
+          )
           window.__subscription = data.subscription
         }
       }
