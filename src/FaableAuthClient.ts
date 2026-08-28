@@ -1190,17 +1190,59 @@ export class FaableAuthClient extends Base {
   async linkOauthConnection(
     credentials: SignInWithOAuthConnection
   ): Promise<OAuthResponse> {
+    // The server links to the user of ITS cookie session — which a session
+    // obtained through a direct grant (passwordless OTP against
+    // /oauth/token) never created, and a cross-site cookie would be dropped
+    // anyway. The ticket carries who to link to instead; /authorize
+    // establishes the session from it on the top-level navigation. Without
+    // it, every OTP-authenticated user got `login_required` here
+    // (arch/auth/link-mode-session-ticket.md).
+    const link_ticket = await this._mintLinkTicket()
     return await this._handleConnectionSignIn({
       connection: credentials.connection,
       connection_id: credentials.connection_id,
       redirectTo: credentials?.redirectTo,
       returnTo: credentials?.returnTo,
       scopes: credentials?.scopes,
-      queryParams: credentials.queryParams,
+      queryParams: link_ticket
+        ? { ...(credentials.queryParams ?? {}), link_ticket }
+        : credentials.queryParams,
       skipBrowserRedirect: credentials.skipBrowserRedirect,
       audience: credentials.audience,
       link: true
     })
+  }
+
+  /**
+   * Trades the current access token for a single-use link ticket
+   * (`POST /oauth/link_ticket`). Best-effort by design: no session, an
+   * older server without the endpoint, an expired token or a network error
+   * all resolve to `null`, and the link round-trip proceeds without a
+   * ticket — the server then answers exactly as it did before tickets
+   * existed (`login_required` unless it has a cookie session).
+   */
+  private async _mintLinkTicket(): Promise<string | null> {
+    try {
+      const { data } = await this.getSession()
+      const access_token = data?.session?.access_token
+      if (!access_token) {
+        this._debug('#_mintLinkTicket()', 'no session, skipping')
+        return null
+      }
+      const res = await _post<{ link_ticket?: string }>(
+        `${this.domainUrl}/oauth/link_ticket`,
+        {},
+        { token: access_token }
+      )
+      if (res.error || !res.data?.link_ticket) {
+        this._debug('#_mintLinkTicket()', 'not issued', res.status, res.error)
+        return null
+      }
+      return res.data.link_ticket
+    } catch (error) {
+      this._debug('#_mintLinkTicket()', 'failed', error)
+      return null
+    }
   }
 
   /**

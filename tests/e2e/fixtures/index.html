@@ -31,6 +31,15 @@
         async signInWithPasswordless(payload) {
           return window.__client.signInWithPasswordless(payload)
         },
+        async linkOauthConnection(payload) {
+          // skipBrowserRedirect keeps the page here so the test can read the
+          // /authorize URL the SDK would have navigated to.
+          const { data, error } = await window.__client.linkOauthConnection({
+            skipBrowserRedirect: true,
+            ...payload
+          })
+          return { url: data?.url ?? null, error: error ? error.message : null }
+        },
         async signOut() {
           return window.__client.signOut({ scope: 'local' })
         },

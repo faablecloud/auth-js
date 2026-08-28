@@ -25,7 +25,14 @@ function freshState() {
     // so tests can assert that a real server refusal (an action deny, a rate
     // limit) reaches the caller verbatim instead of being flattened into a
     // generic "session missing".
-    tokenFailure: null
+    tokenFailure: null,
+    // Every POST /oauth/link_ticket the SDK made: which bearer it sent and
+    // which ticket came back. Lets the link spec prove the ticket in the
+    // /authorize URL is the one minted for THIS session's access token.
+    linkTickets: [],
+    // Forces POST /oauth/link_ticket to answer with this status (e.g. 404 for
+    // a server that predates the endpoint).
+    linkTicketFailure: null
   }
 }
 
@@ -81,6 +88,12 @@ export function createMockServer() {
     res.json({ ok: true })
   })
 
+  app.post('/__seed/link_ticket_failure', (req, res) => {
+    const { status, body } = req.body
+    state.linkTicketFailure = { status, body }
+    res.json({ ok: true })
+  })
+
   app.post('/__seed/token_failure', (req, res) => {
     const { status, body } = req.body
     state.tokenFailure = { status, body }
@@ -93,7 +106,8 @@ export function createMockServer() {
       sessions: [...state.sessions.keys()],
       refreshables: [...state.refreshables.keys()],
       otps: [...state.otps.entries()],
-      audiences: state.audiences
+      audiences: state.audiences,
+      linkTickets: state.linkTickets
     })
   })
 
@@ -193,6 +207,25 @@ export function createMockServer() {
     }
 
     oauthError(res, 400, 'unsupported_grant_type')
+  })
+
+  // Link-mode session bootstrap (arch/auth/link-mode-session-ticket.md):
+  // trades a valid Bearer for a single-use ticket the SDK appends to
+  // /authorize?link=true. Records the exchange so the spec can match the
+  // ticket in the URL against the bearer that minted it.
+  app.post('/oauth/link_ticket', (req, res) => {
+    if (state.linkTicketFailure) {
+      const { status, body } = state.linkTicketFailure
+      state.linkTicketFailure = null
+      return res.status(status).json(body)
+    }
+    const auth = req.header('authorization') || ''
+    const token = auth.replace(/^Bearer\s+/i, '')
+    const user = state.sessions.get(token)
+    if (!user) return res.status(401).json({ message: 'no_authorization' })
+    const link_ticket = randomString('lt_')
+    state.linkTickets.push({ bearer: token, link_ticket })
+    res.json({ link_ticket, expires_in: 60 })
   })
 
   app.get('/me', (req, res) => {
