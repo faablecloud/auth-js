@@ -7,9 +7,18 @@ export type JsonResponse<T = any> = {
   /**
    * HTTP status of the response, when there was one. Callers that turn a
    * failed response into an AuthError need it — reading it back out of the
-   * body only works for servers that happen to echo it there.
+   * body only works for servers that happen to echo it there. `undefined`
+   * means the request never completed (network failure) — there was no
+   * server verdict at all.
    */
   status?: number
+  /**
+   * Stable machine code the server attached to a failed response
+   * (`error_code` in the body, e.g. `user_suspended`). Unlike the
+   * human-readable `error` message this is a contract — callers branch on
+   * it to tell apart denials that share an HTTP status or OAuth code.
+   */
+  code?: string
 }
 
 type RequestInitWithToken = RequestInit & {
@@ -73,13 +82,15 @@ const _handleRes = async (
         parsed = body
       }
     }
+    const parsed_code = (parsed as Record<string, unknown> | null)?.error_code
     return {
       data: body,
       // Never let a failed response come back with a falsy error: callers
       // branch on it, and an empty one sends them down the success path.
       error:
         _errorMessage(parsed) ?? `Request failed with status ${res.status}`,
-      status: res.status
+      status: res.status,
+      ...(typeof parsed_code === 'string' ? { code: parsed_code } : {})
     }
   }
   return { data: body, error: null, status: res.status }

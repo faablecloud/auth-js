@@ -3,6 +3,7 @@ import {
   cookieStorageAdapter,
   getSessionFromCookies
 } from './FaableAuthClient'
+import type { SignOutReason } from './FaableAuthClient'
 import { createClient } from './createClient'
 import { AuthError } from './lib/errors'
 import type {
@@ -53,5 +54,6 @@ export type {
   LastUsedLoginMethodKind,
   OAuthResponse,
   AuthFlowType,
-  Provider
+  Provider,
+  SignOutReason
 }

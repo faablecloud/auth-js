@@ -69,6 +69,7 @@ export type ErrorCode =
   | 'over_email_send_rate_limit'
   | 'over_sms_send_rate_limit'
   | 'bad_code_verifier'
+  | 'user_suspended'
 
 export class AuthError extends Error {
   /**

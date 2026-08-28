@@ -179,7 +179,8 @@ export function expiresAt(expiresIn: number) {
 export function _sessionResponse({
   data,
   error,
-  status
+  status,
+  code
 }: JsonResponse<Partial<RawAuthResponse>>): AuthResponse {
   // Forward what the server actually said. This used to destructure `data`
   // alone and hardcode `error: null`, which made the `if (error)` branch in
@@ -198,10 +199,15 @@ export function _sessionResponse({
       // Callers read `error.message`, so the raw string the fetch layer
       // produces has to be wrapped — a bare string would silently render as
       // `undefined`. Fastify puts the status and the code in the error body.
+      // Code precedence: the server's stable `error_code` (the contract UIs
+      // branch on, e.g. `user_suspended`) over the RFC 6749 `error` (too
+      // coarse — `invalid_grant` covers unrelated denials).
       error: new AuthApiError(
         message,
         status ?? (typeof body.statusCode === 'number' ? body.statusCode : 500),
-        typeof body.error === 'string' ? body.error : undefined
+        code ??
+          (typeof body.error_code === 'string' ? body.error_code : undefined) ??
+          (typeof body.error === 'string' ? body.error : undefined)
       )
     }
   }

@@ -9,6 +9,7 @@ import {
   AuthImplicitGrantRedirectError,
   AuthInvalidTokenResponseError,
   AuthPKCEGrantCodeExchangeError,
+  AuthRetryableFetchError,
   AuthSessionMissingError,
   AuthUnknownError,
   isAuthApiError,
@@ -78,6 +79,23 @@ const AUTO_REFRESH_TICK_THRESHOLD = 3
 
 /** Hard upper bound for a single refresh-token call before it's aborted. */
 const REFRESH_TIMEOUT_MS = 30 * 1000
+
+/**
+ * Storage-key suffix for the consume-once sign-out reason
+ * ({@link FaableAuthClient.getSignOutReason}). Shares the session's
+ * `storageKey` prefix so multiple clients on one origin don't cross-read.
+ */
+const SIGNOUT_REASON_SUFFIX = '-signout-reason'
+
+/** Consume-once record of why the SDK terminated the session on its own. */
+export type SignOutReason = {
+  /** Stable machine code when the server sent one (e.g. `user_suspended`). */
+  code?: string
+  /** Human-readable message from the terminal error. */
+  message: string
+  /** Epoch ms when the session was terminated. */
+  at: number
+}
 
 const resolveStorage = (config: FaableAuthClientConfig): SupportedStorage => {
   const { storage, cookieOptions } = config
@@ -1231,12 +1249,24 @@ export class FaableAuthClient extends Base {
     )
 
     if (!rawAuthResponse.data || rawAuthResponse.error) {
+      const raw = rawAuthResponse.error
+      const message =
+        (raw instanceof Error ? raw.message : raw) ||
+        'Error in username password login'
       return {
         data: null,
-        error: new AuthUnknownError(
-          rawAuthResponse.error || 'Error in username password login',
-          rawAuthResponse.error
-        )
+        // When the server answered, surface a typed error carrying its
+        // stable machine code (e.g. `user_suspended`) so login UIs can
+        // branch on `error.code`; without a status there was no verdict
+        // (network failure) and the legacy unknown-error shape stands.
+        error:
+          rawAuthResponse.status !== undefined
+            ? new AuthApiError(
+                message,
+                rawAuthResponse.status,
+                rawAuthResponse.code
+              )
+            : new AuthUnknownError(message, raw)
       }
     }
     // The form below navigates the page; record the attempt while we still can.
@@ -1920,6 +1950,67 @@ export class FaableAuthClient extends Base {
   }
 
   /**
+   * Why the SDK last terminated the session on its own (a refresh rejected
+   * by the server — e.g. `code: 'user_suspended'`, a revoked grant), or
+   * `null` when the last sign-out was voluntary or there was none.
+   *
+   * Consume-once, like {@link getRedirectError}: the first read clears it so
+   * a later visit to the login page can't re-show a stale banner. Persisted
+   * in storage (not memory) because the terminating tab usually navigates
+   * away — the login page that renders the reason is a fresh document.
+   *
+   * @example
+   * ```ts
+   * const reason = await auth.getSignOutReason()
+   * if (reason?.code === 'user_suspended') showSuspendedPanel()
+   * ```
+   * @category Sessions
+   */
+  async getSignOutReason(): Promise<SignOutReason | null> {
+    try {
+      const key = this.storageKey + SIGNOUT_REASON_SUFFIX
+      const stored = await getItemAsync(this.storage, key)
+      if (!stored || typeof stored !== 'object') return null
+      await this.storage.removeItem(key)
+      const reason = stored as Partial<SignOutReason>
+      if (typeof reason.message !== 'string') return null
+      return {
+        message: reason.message,
+        ...(typeof reason.code === 'string' ? { code: reason.code } : {}),
+        at: typeof reason.at === 'number' ? reason.at : 0
+      }
+    } catch (e) {
+      // Storage can be unavailable (SSR, privacy modes) — a missing reason
+      // must never break the login page.
+      this._debug('#getSignOutReason()', 'error', e)
+      return null
+    }
+  }
+
+  /**
+   * Persist the reason for an SDK-initiated session termination. Voluntary
+   * {@link signOut} never writes this — only terminal refresh failures do.
+   */
+  private async _stashSignOutReason(error: AuthError) {
+    try {
+      const reason: SignOutReason = {
+        message: error.message,
+        ...(error.code ? { code: error.code } : {}),
+        at: Date.now()
+      }
+      await setItemAsync(
+        this.storage,
+        this.storageKey + SIGNOUT_REASON_SUFFIX,
+        reason
+      )
+    } catch (e) {
+      // Best-effort: losing the reason only costs the login page some
+      // context; it must never interfere with the sign-out itself.
+      this._debug('#_stashSignOutReason()', 'error', e)
+    }
+  }
+
+  /**
    * Use instead of {@link #getSession} inside the library. It is
    * semantically usually what you want, as getting a session involves some
    * processing afterwards that requires only one client operating on the
@@ -2141,7 +2232,12 @@ export class FaableAuthClient extends Base {
       token: access_token
     })
     this._debug('#_getUser() end')
-    return { data: res.data, error: res.error }
+    return {
+      data: res.data,
+      error: res.error,
+      status: res.status,
+      code: res.code
+    }
   }
 
   private async _callRefreshToken(refreshToken: string) {
@@ -2184,6 +2280,11 @@ export class FaableAuthClient extends Base {
         const result = { session: null, error }
 
         if (!isAuthRetryableFetchError(error)) {
+          // The SDK is about to end the session on its own — leave a
+          // consume-once record of WHY, so the login screen the user lands
+          // on can say "account suspended" instead of going mute. Written
+          // BEFORE the removal: the SIGNED_OUT subscribers may navigate.
+          await this._stashSignOutReason(error)
           await this._removeSession()
           await this._notifyAllSubscribers('SIGNED_OUT', null)
         }
@@ -2239,9 +2340,34 @@ export class FaableAuthClient extends Base {
             }
           )
           if (rawResponse.error) {
-            throw new AuthUnknownError(
-              `Refresh token request failed: ${rawResponse.error}`,
-              rawResponse.error
+            // No HTTP status → the request never completed (network down,
+            // CORS, aborted); a 5xx → the server broke. Neither is a verdict
+            // on the grant, so both are retryable — historically EVERY
+            // failure here became a non-retryable AuthUnknownError and one
+            // wifi blip during a refresh silently signed the user out. With
+            // short-lived access tokens (refresh every ~30 min) that would
+            // be constant, so only a definitive 4xx may kill the session.
+            if (
+              rawResponse.status === undefined ||
+              rawResponse.status >= 500
+            ) {
+              throw new AuthRetryableFetchError(
+                rawResponse.error instanceof Error
+                  ? rawResponse.error.message
+                  : String(rawResponse.error),
+                rawResponse.status ?? 0
+              )
+            }
+            // Definitive server rejection: surface the RFC 6749 body as a
+            // typed AuthApiError carrying the stable machine code
+            // (`user_suspended`, …) so the sign-out reason can record WHY.
+            const { error: api_error } = _sessionResponse(rawResponse)
+            throw (
+              api_error ??
+              new AuthUnknownError(
+                `Refresh token request failed: ${rawResponse.error}`,
+                rawResponse.error
+              )
             )
           }
           const session_res = _sessionResponse(rawResponse)
@@ -2249,12 +2375,29 @@ export class FaableAuthClient extends Base {
           if (!session_res.data.session?.access_token) {
             throw new AuthInvalidTokenResponseError()
           }
-          const { data: user, error } = await this._getUser(
-            session_res.data.session?.access_token
-          )
+          const {
+            data: user,
+            error,
+            status: user_status,
+            code: user_code
+          } = await this._getUser(session_res.data.session?.access_token)
 
           if (error) {
-            throw new AuthUnknownError('Could not fetch user info', error)
+            // Same classification as the grant above: no status / 5xx is
+            // transient (the freshly minted token is fine — retry), a 4xx is
+            // a real denial (e.g. the user was suspended between the grant
+            // and this read) and carries its machine code.
+            if (user_status === undefined || user_status >= 500) {
+              throw new AuthRetryableFetchError(
+                'Could not fetch user info',
+                user_status ?? 0
+              )
+            }
+            throw new AuthApiError(
+              error instanceof Error ? error.message : String(error),
+              user_status,
+              user_code
+            )
           }
           if (!user) {
             throw new AuthUnknownError('Refresh response missing user', null)
