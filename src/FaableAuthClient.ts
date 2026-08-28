@@ -2347,10 +2347,7 @@ export class FaableAuthClient extends Base {
             // wifi blip during a refresh silently signed the user out. With
             // short-lived access tokens (refresh every ~30 min) that would
             // be constant, so only a definitive 4xx may kill the session.
-            if (
-              rawResponse.status === undefined ||
-              rawResponse.status >= 500
-            ) {
+            if (rawResponse.status === undefined || rawResponse.status >= 500) {
               throw new AuthRetryableFetchError(
                 rawResponse.error instanceof Error
                   ? rawResponse.error.message

@@ -128,8 +128,9 @@ describe('sign-out reason on terminal refresh failure', () => {
     expect(result.error).toBeTruthy()
     expect(events).not.toContain('SIGNED_OUT')
     // The session survives — the failure was not a server verdict.
-    expect(await (auth as any).storage.getItem((auth as any).storageKey)).not
-      .toBeNull()
+    expect(
+      await (auth as any).storage.getItem((auth as any).storageKey)
+    ).not.toBeNull()
     expect(await auth.getSignOutReason()).toBeNull()
   })
 
@@ -150,8 +151,9 @@ describe('sign-out reason on terminal refresh failure', () => {
 
     expect(result.session).toBeNull()
     expect(result.error).toBeTruthy()
-    expect(await (auth as any).storage.getItem((auth as any).storageKey)).not
-      .toBeNull()
+    expect(
+      await (auth as any).storage.getItem((auth as any).storageKey)
+    ).not.toBeNull()
     expect(await auth.getSignOutReason()).toBeNull()
   })
 
