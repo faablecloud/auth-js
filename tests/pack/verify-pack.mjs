@@ -96,14 +96,16 @@ try {
       process.exit(1);
     }
 
-    // The SDK must name its own version on the wire. Every published build
-    // reported "auth-js/0.0.0" until 2026-08-29: src/lib/version.ts held a
-    // sentinel the release replacement did not match, so the rewrite only hit
-    // the rollup banner and server-side client-version telemetry was dead on
-    // arrival. Assert the PRE-release sentinel reaches the header from the
-    // packed bundle — semantic-release rewrites that same string at publish
-    // time, so if the injection breaks again this fails the build instead of
-    // shipping an anonymous client.
+    // The SDK must name its own version AND commit on the wire, as
+    // "auth-js/<version>+<short-sha>". Every published build reported
+    // "auth-js/0.0.0" until 2026-08-29: src/lib/version.ts held a sentinel the
+    // release replacement did not match, so the rewrite only hit the rollup
+    // banner and server-side client telemetry was dead on arrival.
+    //
+    // Assert the PRE-release sentinels reach the header from the packed
+    // bundle. semantic-release rewrites those exact strings at publish time,
+    // so if either injection breaks this fails the build instead of shipping
+    // an anonymous client.
     {
       const versionProbe = mod.createClient({ domain: "https://t.auth.faable.link", clientId: "test-client", autoRefreshToken: false });
       sent.length = 0;
@@ -114,8 +116,16 @@ try {
         process.exit(1);
       }
       const client = call.headers["x-faable-client"] ?? call.headers["X-Faable-Client"];
-      if (client !== "auth-js/0.0.0-dev") {
-        console.error("x-faable-client must carry the release sentinel 'auth-js/0.0.0-dev', got:", client);
+      if (client !== "auth-js/0.0.0-dev+0000000dev") {
+        console.error("x-faable-client must carry both release sentinels 'auth-js/0.0.0-dev+0000000dev', got:", client);
+        process.exit(1);
+      }
+      // The header has a hard budget: auth caps the segment after the slash at
+      // 32 chars and DROPS it entirely past that, so an over-long version+sha
+      // would silently stop reporting either. Released values are shorter than
+      // the sentinels, so checking these is the conservative bound.
+      if (client.slice("auth-js/".length).length > 32) {
+        console.error("client version+sha exceeds the 32-char budget auth allows:", client);
         process.exit(1);
       }
     }

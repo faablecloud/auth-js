@@ -28,6 +28,13 @@
             ],
             "from": "0.0.0-dev",
             "to": "${nextRelease.version}"
+          },
+          {
+            "files": [
+              "pkg/dist/*.js"
+            ],
+            "from": "0000000dev",
+            "to": "${nextRelease.gitHead.slice(0, 7)}"
           }
         ]
       }

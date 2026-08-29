@@ -1,5 +1,5 @@
 import { fetch } from './globals'
-import { version } from './version'
+import { commit, version } from './version'
 
 export type JsonResponse<T = any> = {
   data: T | null
@@ -29,10 +29,16 @@ type RequestInitWithToken = RequestInit & {
 const headers = (init: Partial<RequestInitWithToken> = {}) => {
   // Identify ourselves as a first-party client so the auth server can tell
   // auth-js (browser OAuth SDK) traffic apart from the dashboard, the
-  // management SDK, or third-party integrations. Format: `<name>/<version>`
-  // (version injected at release time).
+  // management SDK, or third-party integrations.
+  //
+  // Format: `<name>/<version>+<short-sha>` — semver build metadata, so the
+  // commit rides along in the header the server ALREADY allows through CORS
+  // and already parses. A separate header would have needed
+  // `Access-Control-Allow-Headers` on the auth side deployed strictly before
+  // this, and every request in between would have failed preflight.
+  // Both segments are injected at release time (see ./version).
   let headers: Record<string, string> = {
-    'x-faable-client': `auth-js/${version}`
+    'x-faable-client': `auth-js/${version}+${commit}`
   }
   if (init?.token) {
     headers = { ...headers, Authorization: `Bearer ${init?.token}` }
