@@ -51,6 +51,23 @@ try {
     const loc = { href: "https://app.example.com/page", origin: "https://app.example.com" };
     globalThis.window = { location: loc, history: { state: null, replaceState: (s, t, u) => { loc.href = u; } }, addEventListener: () => {}, removeEventListener: () => {} };
     globalThis.document = {};
+
+    // Records outgoing requests so the assertions below can read the headers
+    // the SDK actually puts on the wire. Installed BEFORE the import for the
+    // same reason as the globals above: lib/globals captures fetch at
+    // module-evaluation time.
+    const sent = [];
+    globalThis.fetch = async (url, init = {}) => {
+      sent.push({ url: String(url), headers: init.headers ?? {} });
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        json: async () => ({}),
+        text: async () => "{}"
+      };
+    };
+
     const mod = await import("@faable/auth-js");
 
     const required = ["createClient", "FaableAuthClient", "AuthError"];
@@ -77,6 +94,30 @@ try {
     if (typeof client.signInWithOauthConnection !== "function") {
       console.error("Instance missing signInWithOauthConnection");
       process.exit(1);
+    }
+
+    // The SDK must name its own version on the wire. Every published build
+    // reported "auth-js/0.0.0" until 2026-08-29: src/lib/version.ts held a
+    // sentinel the release replacement did not match, so the rewrite only hit
+    // the rollup banner and server-side client-version telemetry was dead on
+    // arrival. Assert the PRE-release sentinel reaches the header from the
+    // packed bundle — semantic-release rewrites that same string at publish
+    // time, so if the injection breaks again this fails the build instead of
+    // shipping an anonymous client.
+    {
+      const versionProbe = mod.createClient({ domain: "https://t.auth.faable.link", clientId: "test-client", autoRefreshToken: false });
+      sent.length = 0;
+      await versionProbe.signInWithPasswordless({ email: "probe@example.com", type: "code" }).catch(() => {});
+      const call = sent.find((c) => c.url.includes("/passwordless/start"));
+      if (!call) {
+        console.error("Expected a /passwordless/start request to inspect, saw:", sent.map((c) => c.url));
+        process.exit(1);
+      }
+      const client = call.headers["x-faable-client"] ?? call.headers["X-Faable-Client"];
+      if (client !== "auth-js/0.0.0-dev") {
+        console.error("x-faable-client must carry the release sentinel 'auth-js/0.0.0-dev', got:", client);
+        process.exit(1);
+      }
     }
 
     // Bundle-level regression for the 2.3.0 logout bug: the published CJS is
