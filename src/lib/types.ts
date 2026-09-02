@@ -34,6 +34,40 @@ export class User {
 }
 
 /**
+ * Decoded payload of the session's access token, as returned by
+ * {@link FaableAuthClient.getClaims}. Standard JWT / OAuth claims are typed;
+ * custom claims set by the tenant (a connection's `claims_mapping` or an
+ * Action's `api.accessToken.setCustomClaim`) surface through the index
+ * signature — narrow them with the generic parameter of `getClaims`.
+ *
+ * Decoded locally, NOT signature-verified: good for UI decisions ("which
+ * station am I in?"), never for authorization — the resource server that
+ * receives the token is what validates it.
+ */
+export interface JwtClaims {
+  /** Issuer — the Faable Auth tenant URL. */
+  iss?: string
+  /** Subject — the user id (`user_…`) or, for M2M tokens, the client id. */
+  sub?: string
+  /** Audience — the Api identifier or `${iss}/userinfo`. */
+  aud?: string | string[]
+  /** Expiry, seconds since the epoch. */
+  exp?: number
+  /** Issued at, seconds since the epoch. */
+  iat?: number
+  /** Space-separated granted scopes. */
+  scope?: string
+  /** Space-separated permissions (Auth0 `access_token_authz` dialect). */
+  permissions?: string
+  client_id?: string
+  /** Team slugs, when the Api opted in. */
+  teams?: string[]
+  /** Role names, when the Api opted in. */
+  roles?: string[]
+  [key: string]: unknown
+}
+
+/**
  * The state of the application before the user was redirected to the login page.
  */
 export type AppState = {

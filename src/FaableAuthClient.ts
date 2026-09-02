@@ -49,6 +49,7 @@ import {
   AuthResult,
   CallRefreshTokenResult,
   InitializeResult,
+  JwtClaims,
   LastUsedCookieOptions,
   OAuthResponse,
   SignInWithOAuthConnection,
@@ -1958,6 +1959,67 @@ export class FaableAuthClient extends Base {
     })
 
     return result
+  }
+
+  /**
+   * The claims of the current session's access token, decoded locally — the
+   * standard JWT set plus any custom claim the tenant put there (a
+   * connection's `claims_mapping`, an Action's
+   * `api.accessToken.setCustomClaim`). Refreshes the session first when it
+   * has expired, exactly like {@link getSession}, so the claims are always
+   * those of a live token; custom claims survive refreshes by design.
+   *
+   * `claims` is `null` (with no error) when there is no session. The token
+   * is decoded, not signature-verified: use the result for UI and routing
+   * decisions, never as authorization — that is the resource server's job.
+   * Narrow your own claims with the generic parameter.
+   *
+   * @example
+   * ```ts
+   * const { data } = await auth.getClaims<{ 'ciapol.com/station_id': string }>()
+   * const station = data.claims?.['ciapol.com/station_id']
+   * ```
+   * @category Sessions
+   */
+  async getClaims<
+    T extends Record<string, unknown> = Record<string, unknown>
+  >(): Promise<
+    | { data: { claims: JwtClaims & T; session: Session }; error: null }
+    | { data: { claims: null; session: null }; error: AuthError | null }
+  > {
+    const { data, error } = await this.getSession()
+    if (error || !data.session) {
+      return { data: { claims: null, session: null }, error: error ?? null }
+    }
+    try {
+      const claims = decodeJWTPayload(data.session.access_token) as JwtClaims &
+        T
+      return { data: { claims, session: data.session }, error: null }
+    } catch (e) {
+      return {
+        data: { claims: null, session: null },
+        error: new AuthUnknownError(
+          `Could not decode the access token: ${(e as Error).message}`,
+          e
+        )
+      }
+    }
+  }
+
+  /**
+   * One claim of the current session's access token, or `null` when there is
+   * no session or the claim is absent. Sugar over {@link getClaims}.
+   *
+   * @example
+   * ```ts
+   * const station = await auth.getClaim<string>('ciapol.com/station_id')
+   * ```
+   * @category Sessions
+   */
+  async getClaim<T = unknown>(name: string): Promise<T | null> {
+    const { data } = await this.getClaims()
+    const value = data.claims?.[name]
+    return value === undefined ? null : (value as T)
   }
 
   /**

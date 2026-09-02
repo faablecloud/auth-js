@@ -194,9 +194,10 @@ once, not a runtime condition to catch.
 
 This applies to `signInWithOauthConnection`, `signInWithUsernamePassword`,
 `signUp`, `signInWithOtp`, `signInWithPasswordless`, `changePassword`,
-`changeEmail`, `signOut`, `getSession`, `setSession`, `refreshSession`,
-`initialize` and `handleRedirectCallback`. Their return types (`AuthResult<T>`,
-`AuthResponse`, `OAuthResponse`) are all variants of the same shape.
+`changeEmail`, `signOut`, `getSession`, `getClaims`, `setSession`,
+`refreshSession`, `initialize` and `handleRedirectCallback`. Their return types
+(`AuthResult<T>`, `AuthResponse`, `OAuthResponse`) are all variants of the same
+shape.
 
 ### Prefer throw-style? Use `unwrap`
 
@@ -235,6 +236,31 @@ await auth.refreshSession()
 
 Auth events are broadcast across tabs using `BroadcastChannel`, so a sign-in or
 sign-out in one tab is reflected in every other tab using the same `storageKey`.
+
+### Reading token claims
+
+Custom claims your tenant puts on the access token — a connection's
+`claims_mapping` or an Action's `api.accessToken.setCustomClaim` — are available
+two ways:
+
+- On the user: `/me` returns them as top-level properties, so
+  `session.user['ciapol.com/station_id']` just works.
+- Decoded from the token, without a request:
+
+```ts
+// Typed by namespace; refreshes an expired session first, like getSession()
+const { data } = await auth.getClaims<{ 'ciapol.com/station_id': string }>()
+data.claims?.['ciapol.com/station_id'] // 'station_123456789'
+data.claims?.scope // standard claims are typed too
+
+// One claim, or null when signed out / absent
+const station = await auth.getClaim<string>('ciapol.com/station_id')
+```
+
+The token is decoded, not signature-verified: use claims for UI and routing
+decisions, never as authorization — that is the resource server's job. Custom
+claims are frozen at login and survive refreshes; they change on the next
+sign-in.
 
 ## Storage adapters
 

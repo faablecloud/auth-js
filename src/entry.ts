@@ -18,6 +18,7 @@ import type {
   AuthResult,
   CookieOptions,
   FaableAuthClientConfig,
+  JwtClaims,
   LastUsedCookieOptions,
   OAuthResponse,
   Provider,
@@ -55,5 +56,6 @@ export type {
   OAuthResponse,
   AuthFlowType,
   Provider,
-  SignOutReason
+  SignOutReason,
+  JwtClaims
 }
