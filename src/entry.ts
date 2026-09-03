@@ -5,7 +5,11 @@ import {
 } from './FaableAuthClient'
 import type { SignOutReason } from './FaableAuthClient'
 import { createClient } from './createClient'
-import { AuthError } from './lib/errors'
+import {
+  AuthError,
+  AuthMfaRequiredError,
+  isAuthMfaRequiredError
+} from './lib/errors'
 import type {
   LastUsedLoginMethod,
   LastUsedLoginMethodKind
@@ -34,6 +38,8 @@ export {
   User,
   FaableAuthClient,
   AuthError,
+  AuthMfaRequiredError,
+  isAuthMfaRequiredError,
   createClient,
   cookieStorageAdapter,
   getSessionFromCookies,

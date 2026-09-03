@@ -1,4 +1,4 @@
-import { AuthApiError } from './errors'
+import { AuthApiError, AuthMfaRequiredError } from './errors'
 import { JsonResponse } from './fetch'
 import { saveCodeVerifier } from './pkce_storage'
 import { AuthResponse, SupportedStorage, User } from './types'
@@ -174,6 +174,36 @@ function hasSession(data: Partial<RawAuthResponse>): data is RawAuthResponse {
 export function expiresAt(expiresIn: number) {
   const timeNow = Math.round(Date.now() / 1000)
   return timeNow + expiresIn
+}
+
+/**
+ * Recognise the `403 mfa_required` a direct grant answers with when the tenant
+ * wants a second factor.
+ *
+ * Kept apart from `_sessionResponse` because it is not a failure: the
+ * credentials were right and the grant is only half done. Returns `null` for
+ * anything else, so callers can fall through to their normal handling.
+ */
+export function _mfaChallenge(
+  response: JsonResponse<Partial<RawAuthResponse>>
+): AuthMfaRequiredError | null {
+  if (!response.error) return null
+  const body = (response.data ?? {}) as Record<string, unknown>
+  const code =
+    response.code ??
+    (typeof body.error_code === 'string' ? body.error_code : undefined) ??
+    (typeof body.error === 'string' ? body.error : undefined)
+  if (code !== 'mfa_required' || typeof body.mfa_token !== 'string') return null
+
+  return new AuthMfaRequiredError(
+    body.mfa_token,
+    Array.isArray(body.mfa_required_factors)
+      ? (body.mfa_required_factors as string[])
+      : [],
+    typeof body.error_description === 'string'
+      ? body.error_description
+      : undefined
+  )
 }
 
 export function _sessionResponse({

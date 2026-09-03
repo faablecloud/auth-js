@@ -36,6 +36,7 @@ export type ErrorCode =
   | 'mfa_challenge_expired'
   | 'mfa_verification_failed'
   | 'mfa_verification_rejected'
+  | 'mfa_required'
   | 'insufficient_aal'
   | 'captcha_failed'
   | 'saml_provider_disabled'
@@ -132,6 +133,45 @@ export class AuthApiError extends AuthError {
 
 export function isAuthApiError(error: unknown): error is AuthApiError {
   return isAuthError(error) && error.name === 'AuthApiError'
+}
+
+/**
+ * The tenant requires a second factor and this grant has no browser to send
+ * the user to a challenge screen, so the server handed back a token to come
+ * back with.
+ *
+ * Finish the sign-in with {@link FaableAuthClient.signInWithMfa}, passing the
+ * `mfa_token` from this error and the code the user typed. The token is
+ * single-use and short-lived, but a WRONG code does not consume it — prompt
+ * again with the same token rather than restarting the whole flow.
+ */
+export class AuthMfaRequiredError extends CustomAuthError {
+  /** Opaque token identifying the interrupted grant. */
+  mfa_token: string
+  /**
+   * Which kinds of factor would satisfy the policy (`totp`, `webauthn`).
+   * EMPTY means the user has none enrolled and must enrol one first — on the
+   * hosted security page, since enrolment is not something an application can
+   * do on the user's behalf.
+   */
+  factors: string[]
+
+  constructor(mfa_token: string, factors: string[], message?: string) {
+    super(
+      message ?? 'A second factor is required to finish signing in',
+      'AuthMfaRequiredError',
+      403,
+      'mfa_required'
+    )
+    this.mfa_token = mfa_token
+    this.factors = factors
+  }
+}
+
+export function isAuthMfaRequiredError(
+  error: unknown
+): error is AuthMfaRequiredError {
+  return isAuthError(error) && error.name === 'AuthMfaRequiredError'
 }
 
 export class AuthImplicitGrantRedirectError extends CustomAuthError {

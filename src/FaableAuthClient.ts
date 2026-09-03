@@ -21,6 +21,7 @@ import { document, window } from './lib/globals'
 import {
   Deferred,
   RawAuthResponse,
+  _mfaChallenge,
   _sessionResponse,
   checkExpiresInTime,
   getCodeChallengeAndMethod,
@@ -1451,6 +1452,15 @@ export class FaableAuthClient extends Base {
       }
     )
 
+    // The tenant may require a second factor. This grant has no browser to
+    // redirect, so the server answers 403 with a token to come back with —
+    // surfaced as a typed error the caller can branch on rather than a
+    // generic failure it would show as "login failed".
+    const challenge = _mfaChallenge(rawResponse)
+    if (challenge) {
+      return { data: { user: null, session: null }, error: challenge }
+    }
+
     const { data: sessionData, error } = _sessionResponse(rawResponse)
 
     if (error) {
@@ -1489,6 +1499,84 @@ export class FaableAuthClient extends Base {
       data: { user: session.user, session },
       error: null
     }
+  }
+
+  /**
+   * Finishes a sign-in that a second-factor policy interrupted.
+   *
+   * Call it with the `mfa_token` from an {@link AuthMfaRequiredError} and the
+   * code the user typed — six digits from their authenticator app, or one of
+   * their recovery codes.
+   *
+   * A wrong code does NOT consume the token: prompt again with the same one
+   * instead of restarting the sign-in. The token does expire (a few minutes),
+   * after which the flow has to start over.
+   *
+   * @example
+   * ```ts
+   * const { error } = await auth.signInWithOtp({ username, otp })
+   * if (isAuthMfaRequiredError(error)) {
+   *   const code = await askUserForTheirCode()
+   *   await auth.signInWithMfa({ mfa_token: error.mfa_token, code })
+   * }
+   * ```
+   * @category Sign in
+   */
+  async signInWithMfa(data: {
+    mfa_token: string
+    code: string
+    /** Defaults to `otp` — the authenticator app. */
+    type?: 'otp' | 'recovery_code'
+    audience?: string
+  }): Promise<AuthResponse> {
+    const audience = data.audience ?? this.audience
+    const is_recovery = data.type === 'recovery_code'
+    const rawResponse = await _post<Partial<RawAuthResponse>>(
+      `${this.domainUrl}/oauth/token`,
+      {
+        client_id: this.clientId,
+        grant_type: is_recovery
+          ? 'http://auth0.com/oauth/grant-type/mfa-recovery-code'
+          : 'http://auth0.com/oauth/grant-type/mfa-otp',
+        mfa_token: data.mfa_token,
+        ...(is_recovery ? { recovery_code: data.code } : { otp: data.code }),
+        ...(audience ? { audience } : {})
+      }
+    )
+
+    const { data: sessionData, error } = _sessionResponse(rawResponse)
+    if (error) {
+      return { data: { user: null, session: null }, error }
+    }
+    if (!sessionData?.session) {
+      return {
+        data: { user: null, session: null },
+        error: new AuthInvalidTokenResponseError()
+      }
+    }
+
+    const session = sessionData.session as Session
+    const { data: user, error: userError } = await this._getUser(
+      session.access_token
+    )
+    if (userError || !user) {
+      return {
+        data: { user: null, session: null },
+        error:
+          userError || new AuthUnknownError('Could not fetch user info', null)
+      }
+    }
+
+    session.user = user
+    await this._saveSession(session)
+    // Both events, in this order: subscribers that only care about "is there
+    // a session" keep working unchanged, and those gating on assurance level
+    // get the specific signal they need.
+    await this._notifyAllSubscribers('MFA_CHALLENGE_VERIFIED', session)
+    await this._notifyAllSubscribers('SIGNED_IN', session)
+    this._recordLastUsedMethod({ method: 'otp' })
+
+    return { data: { user: session.user, session }, error: null }
   }
 
   /**
@@ -1684,6 +1772,14 @@ export class FaableAuthClient extends Base {
       response_type?: string
       audience?: string
       /**
+       * OIDC `acr_values` — the assurance level this request demands.
+       * `urn:faable:loa:2` asks for a login that satisfied a second factor,
+       * even when the tenant's policy would not have required one. Combine
+       * with `prompt: 'login'` to force a fresh step-up rather than reusing an
+       * existing single-factor session.
+       */
+      acr_values?: string | string[]
+      /**
        * Extra `/authorize` params merged in as-is — e.g.
        * `{ prompt: 'select_account' }` or `{ prompt: 'login' }` to force
        * account selection / re-authentication even when an SSO session exists.
@@ -1699,7 +1795,11 @@ export class FaableAuthClient extends Base {
       response_type: resolveResponseType(options, isBrowser()),
       audience: options.audience ?? this.audience,
       scope: options.scope,
-      connection: options.connection
+      connection: options.connection,
+      // Space-delimited, per OIDC Core §3.1.2.1.
+      acr_values: Array.isArray(options.acr_values)
+        ? options.acr_values.join(' ')
+        : options.acr_values
     }
 
     const definedParams = Object.fromEntries(
@@ -1758,9 +1858,43 @@ export class FaableAuthClient extends Base {
     scope?: string
     response_type: string
     audience?: string
+    /** See {@link FaableAuthClient.buildAuthorizeUrl}. */
+    acr_values?: string | string[]
+    queryParams?: { [key: string]: string }
   }) {
     const url = this.buildAuthorizeUrl(options)
     windowHelpers.redirect(url)
+  }
+
+  /**
+   * Sends the user through a fresh login that must satisfy a second factor,
+   * regardless of the tenant's policy or of an existing single-factor session.
+   *
+   * The pattern for a sensitive action — changing payment details, deleting an
+   * organisation — where the application wants a stronger proof than the one
+   * the session already carries. Read {@link FaableAuthClient.getAal} first:
+   * a session that is already `2` needs no step-up.
+   *
+   * @example
+   * ```ts
+   * if ((await auth.getAal()) < 2) {
+   *   auth.stepUp({ redirectTo: window.location.href })
+   *   return
+   * }
+   * ```
+   * @category Authorize URLs
+   */
+  stepUp(
+    options: { redirectTo?: string; scope?: string; audience?: string } = {}
+  ) {
+    this.authorize({
+      ...options,
+      response_type: isBrowser() ? 'code' : 'token',
+      acr_values: 'urn:faable:loa:2',
+      // Without this the server may reuse the current single-factor session
+      // and hand back exactly the assurance level we are trying to raise.
+      queryParams: { prompt: 'login' }
+    })
   }
 
   private async _handleConnectionSignIn(options: {
@@ -2020,6 +2154,48 @@ export class FaableAuthClient extends Base {
     const { data } = await this.getClaims()
     const value = data.claims?.[name]
     return value === undefined ? null : (value as T)
+  }
+
+  /**
+   * Authenticator Assurance Level of the current session: `2` when it
+   * satisfied a second factor (or a passkey that verified the user did both
+   * at once), `1` for a single factor, `0` when there is no session.
+   *
+   * Read locally from the access token's `acr` claim — no network call — so it
+   * is cheap enough to gate a render on.
+   *
+   * @example
+   * ```ts
+   * if ((await auth.getAal()) < 2) auth.stepUp()
+   * ```
+   * @category Session
+   */
+  async getAal(): Promise<0 | 1 | 2> {
+    const acr = await this.getClaim<string>('acr')
+    if (acr === 'urn:faable:loa:2') return 2
+    if (acr === 'urn:faable:loa:1') return 1
+    // No `acr` at all means the token predates this, or the tenant never
+    // asked for a level. A session exists, so it is at least one factor.
+    const { data } = await this.getSession()
+    return data?.session ? 1 : 0
+  }
+
+  /**
+   * Did the current session authenticate with this method?
+   *
+   * Values follow RFC 8176 as the server emits them: `pwd`, `otp`, `hwk` for
+   * a hardware key, `federated` for a social login, and `mfa` once a second
+   * factor was satisfied.
+   *
+   * @example
+   * ```ts
+   * const usedPasskey = await auth.hasAmr('hwk')
+   * ```
+   * @category Session
+   */
+  async hasAmr(method: string): Promise<boolean> {
+    const amr = await this.getClaim<string[]>('amr')
+    return Array.isArray(amr) && amr.includes(method)
   }
 
   /**
