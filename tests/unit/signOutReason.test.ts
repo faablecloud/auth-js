@@ -167,3 +167,66 @@ describe('sign-out reason on terminal refresh failure', () => {
     expect(await auth.getSignOutReason()).toBeNull()
   })
 })
+
+// A refresh that never comes back (arch/recordings-review-2026-09-04.md §1).
+//
+// The deadline used to reject with a plain `Error`, which is not an AuthError
+// — so it fell past the classification above to the only exit of
+// `_callRefreshToken` that THROWS instead of returning `{ session, error }`.
+// Nothing stashed a reason, nothing removed the session, nothing fired
+// SIGNED_OUT, and `getSession()` rejected rather than resolving: a consumer
+// awaiting the session on boot was left waiting forever. Measured in
+// production as 14 stuck dashboards in 48 h.
+describe('a refresh that never answers', () => {
+  it('returns an error instead of throwing, and keeps the session', async () => {
+    vi.useFakeTimers()
+    // Never settles, and never rejects — the shape of a connection that hangs.
+    h.fetchImpl = () => new Promise(() => {})
+
+    const auth = new FaableAuthClient(config())
+    await (auth as any)._saveSession(fakeSession())
+
+    const events: string[] = []
+    auth.onAuthStateChange(event => {
+      events.push(event)
+    })
+
+    const pending = (auth as any)._callRefreshToken('refresh')
+    await vi.advanceTimersByTimeAsync(120_000)
+    const result = await pending
+
+    expect(result.session).toBeNull()
+    expect(result.error).toBeTruthy()
+    // Retryable: a deadline elapsing is not a verdict from the server, so it
+    // must be treated like a dropped connection and not like a suspension.
+    expect(result.error.name).toBe('AuthRetryableFetchError')
+    expect(events).not.toContain('SIGNED_OUT')
+    expect(
+      await (auth as any).storage.getItem((auth as any).storageKey)
+    ).not.toBeNull()
+    expect(await auth.getSignOutReason()).toBeNull()
+  })
+
+  it('getSession resolves with the error rather than rejecting', async () => {
+    vi.useFakeTimers()
+    h.fetchImpl = () => new Promise(() => {})
+
+    const auth = new FaableAuthClient(config())
+    // Already expired, so reading the session forces a refresh.
+    await (auth as any)._saveSession({
+      ...fakeSession(),
+      expires_at: Math.round(Date.now() / 1000) - 10,
+      expires_in: -10
+    })
+
+    const pending = auth.getSession()
+    await vi.advanceTimersByTimeAsync(120_000)
+
+    // This is the whole fix as the consumer sees it: a value, not a rejection.
+    // The provider that boots the dashboard calls getSession() with no catch
+    // and only clears its loading flag on the resolved path.
+    const { data, error } = await pending
+    expect(data.session).toBeNull()
+    expect(error).toBeTruthy()
+  })
+})

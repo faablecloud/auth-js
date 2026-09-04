@@ -79,8 +79,20 @@ const AUTO_REFRESH_TICK_DURATION = 30 * 1000
  * A token refresh will be attempted this many ticks before the current session expires. */
 const AUTO_REFRESH_TICK_THRESHOLD = 3
 
-/** Hard upper bound for a single refresh-token call before it's aborted. */
-const REFRESH_TIMEOUT_MS = 30 * 1000
+/**
+ * Hard upper bound for a single `_callRefreshToken`, backoff included.
+ *
+ * DERIVED from the inner budget on purpose. `_refreshAccessToken` retries with
+ * exponential backoff and stops only when the next sleep would overflow
+ * `AUTO_REFRESH_TICK_DURATION` — which allows about 25s of sleeps plus eight
+ * real requests. This used to be an independent `30 * 1000`, numerically equal
+ * to that budget by coincidence, so a perfectly healthy retry sequence crossed
+ * the deadline and was converted into a hard failure at second 30.
+ *
+ * It races, it does not abort: nothing cancels the in-flight fetch (there is no
+ * AbortController in lib/fetch), so an abandoned attempt keeps running.
+ */
+const REFRESH_TIMEOUT_MS = AUTO_REFRESH_TICK_DURATION + 10 * 1000
 
 /**
  * Storage-key suffix for the consume-once sign-out reason
@@ -2540,7 +2552,20 @@ export class FaableAuthClient extends Base {
       const { data, error } = await withTimeout(
         this._refreshAccessToken(refreshToken),
         REFRESH_TIMEOUT_MS,
-        'Token refresh timed out'
+        // A REAL AuthError, and specifically a retryable one. As a plain
+        // `Error` this fell past the `isAuthError` branch below to the only
+        // exit of this method that THROWS instead of returning
+        // `{ session, error }` — no stashed reason, no session removal, no
+        // SIGNED_OUT. Callers that do not catch (`__loadSession`, and so
+        // `getSession()`) rejected instead of resolving, which strands a
+        // consumer that awaits the session on boot: the dashboard's loading
+        // screen hung forever on 2026-09-04.
+        //
+        // Retryable is the honest classification: a deadline elapsing is not a
+        // verdict from the server, so the session must survive it — same
+        // treatment a dropped connection already gets. Status 0 is this file's
+        // convention for "no server verdict".
+        () => new AuthRetryableFetchError('Token refresh timed out', 0)
       )
       if (error) throw error
       if (!data.session) throw new AuthSessionMissingError()
@@ -2550,7 +2575,9 @@ export class FaableAuthClient extends Base {
 
       const result = { session: data.session, error: null }
 
-      this.refreshingDeferred.resolve(result)
+      // Optional, like the two below: `finally` nulls this field, and a
+      // concurrent path can get there first.
+      this.refreshingDeferred?.resolve(result)
 
       return result
     } catch (error) {
