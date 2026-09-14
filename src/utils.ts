@@ -43,6 +43,23 @@ export const getTokenIssuer = (
   return `${domainUrl}`
 }
 
+// Un tenant en loopback es el único que se sirve sin TLS: un auth de
+// desarrollo en `localhost:8080`. Todo lo demás es un host remoto.
+const isLoopbackHost = (raw: string) => {
+  const authority = raw.split('/')[0]
+  // IPv6 va entre corchetes (`[::1]:8080`); el resto parte por el puerto.
+  const host = authority.startsWith('[')
+    ? authority.slice(0, authority.indexOf(']') + 1).toLowerCase()
+    : authority.split(':')[0].toLowerCase()
+
+  return (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host === '[::1]' ||
+    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+  )
+}
+
 // Normaliza el `domain` para que dé igual cómo lo pase el usuario: con o sin
 // protocolo, con trailing slash, o incluso con protocolo duplicado (el valor
 // que el dashboard copia ya trae `https://`). Siempre devuelve
@@ -56,12 +73,13 @@ export const getDomain = (domainUrl: string) => {
     const host = match[2].replace(/^(https?:\/\/)+/i, '')
     return `${match[1].toLowerCase()}://${host}`
   }
-  // Sin protocolo: heredar el del documento actual en browser, https fuera de él.
-  const protocol =
-    typeof location !== 'undefined' && location?.protocol
-      ? location.protocol.replace(/:$/, '')
-      : 'https'
-  return `${protocol}://${raw}`
+  // Sin protocolo: `https`, salvo un tenant en loopback.
+  //
+  // Aquí NO se hereda `location.protocol`: una app servida por http en
+  // localhost apuntaría al :80 del tenant, que no atiende y devuelve un 404
+  // pelado sin cabeceras CORS — el navegador lo reporta como error de CORS y
+  // el fallo no se reproduce en producción, donde la app ya va por https.
+  return `${isLoopbackHost(raw) ? 'http' : 'https'}://${raw}`
 }
 
 export const encode = (value: string) => btoa(value)
