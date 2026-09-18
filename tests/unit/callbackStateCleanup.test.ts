@@ -156,3 +156,65 @@ describe('appState', () => {
     expect(result.appState).toBeUndefined()
   })
 })
+
+// ⚠️ La trampa que hace falta que exista el getter: los callbacks de
+// onAuthStateChange se ESPERAN (`await sub.callback(...)`), y
+// handleRedirectCallback() es el initialize() que los está emitiendo. Quien lo
+// llame desde dentro de un listener se queda colgado.
+describe('appState desde un listener', () => {
+  const setup = async () => {
+    h.loc.href = 'https://app.example.com/apply?code=code_abc'
+    const storage = inMemoryStorage()
+    await saveCodeVerifier(
+      storage,
+      'faable-auth-token-test-client-code-verifier',
+      { verifier: 'verifier_abc', appState: { course_key: 'abc' } }
+    )
+    net.impl = async (url: string) =>
+      url.endsWith('/oauth/token')
+        ? { ok: true, status: 200, json: async () => tokenResponse() }
+        : { ok: true, status: 200, json: async () => ({ id: 'user_1' }) }
+
+    return new FaableAuthClient({
+      domain: 'https://tenant.auth.faable.link',
+      clientId: 'test-client',
+      storage,
+      storageKey: 'faable-auth-token',
+      autoRefreshToken: false,
+      flowType: 'pkce'
+    } as any)
+  }
+
+  it('el getter se lee dentro del SIGNED_IN', async () => {
+    const auth = await setup()
+    let seen: unknown = 'no corrió'
+
+    auth.onAuthStateChange((ev: string) => {
+      if (ev === 'SIGNED_IN') seen = auth.appState
+    })
+    await auth.handleRedirectCallback()
+
+    expect(seen).toEqual({ course_key: 'abc' })
+  })
+
+  it('await handleRedirectCallback() dentro del listener NO resuelve', async () => {
+    const auth = await setup()
+    let seen: unknown = 'no corrió'
+
+    auth.onAuthStateChange(async (ev: string) => {
+      if (ev !== 'SIGNED_IN') return
+      seen = await Promise.race([
+        auth.handleRedirectCallback().then(r => r.appState),
+        new Promise(res => setTimeout(() => res('COLGADO'), 200))
+      ])
+    })
+    await Promise.race([
+      auth.handleRedirectCallback(),
+      new Promise(res => setTimeout(res, 1000))
+    ])
+
+    // Si algún día esto deja de ser 'COLGADO', el getter sobra y se puede
+    // documentar el camino directo.
+    expect(seen).toBe('COLGADO')
+  })
+})

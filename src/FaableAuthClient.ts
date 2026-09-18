@@ -197,6 +197,17 @@ export class FaableAuthClient extends Base {
   protected lock: Lock
 
   /**
+   * El `appState` del login que se está consumiendo ahora mismo.
+   *
+   * Existe por una razón concreta: los callbacks de `onAuthStateChange` se
+   * ESPERAN, y `handleRedirectCallback()` es el propio `initialize()` en
+   * vuelo, así que un listener que haga `await auth.handleRedirectCallback()`
+   * dentro de `SIGNED_IN` se queda colgado para siempre. Este getter se puede
+   * leer ahí de forma síncrona.
+   */
+  protected _appState: unknown = undefined
+
+  /**
    * Creates a new authentication client bound to a Faable Auth tenant.
    *
    * The constructor kicks off {@link FaableAuthClient.initialize} in the
@@ -329,6 +340,29 @@ export class FaableAuthClient extends Base {
    */
   get lastInitializeResult(): InitializeResult | null {
     return this._lastInitializeResult
+  }
+
+  /**
+   * Lo que la app pidió llevarse al arrancar el login ({@link SignInWithOAuthConnection.appState}),
+   * ya deserializado, o `undefined` si no pidió nada.
+   *
+   * Es la misma información que `appState` en el resultado de
+   * {@link FaableAuthClient.handleRedirectCallback}, pero **legible de forma
+   * síncrona**, que es lo que hace falta dentro de un
+   * {@link FaableAuthClient.onAuthStateChange}:
+   *
+   * ```ts
+   * auth.onAuthStateChange((ev) => {
+   *   if (ev === 'SIGNED_IN') console.log(auth.appState)
+   * })
+   * ```
+   *
+   * ⚠️ **No llames a `handleRedirectCallback()` dentro de un listener**: los
+   * callbacks se esperan y ese método es el `initialize()` que los está
+   * emitiendo, así que la promesa no resuelve nunca.
+   */
+  get appState(): unknown {
+    return this._appState
   }
 
   /**
@@ -698,6 +732,10 @@ export class FaableAuthClient extends Base {
       sentState = false,
       appState
     } = stored
+
+    // Antes del canje, y por tanto antes del SIGNED_IN que se emite dentro:
+    // un listener tiene que poder leerlo mientras reacciona.
+    this._appState = appState
 
     const rawResponse = await _post<Partial<RawAuthResponse>>(
       `${this.domainUrl}/oauth/token`,
