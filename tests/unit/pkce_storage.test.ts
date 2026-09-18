@@ -110,3 +110,26 @@ describe('pkce_storage', () => {
     expect(result).not.toHaveProperty('returnTo')
   })
 })
+
+// El `state` que el SDK NO mandó sólo lo pudo poner el servidor: hasta el
+// 2026-09-18 era una clave interna del StateStore y se quedaba en la URL de la
+// app para siempre (arch/auth/oauth-state-internal-key-leak.md). Para poder
+// distinguirlo del `state` que sí es de la app, la marca viaja con el verifier.
+describe('sentState', () => {
+  it('viaja con el verifier cuando la app mandó su propio state', async () => {
+    const storage = inMemoryStorage()
+    await saveCodeVerifier(storage, 'k', {
+      verifier: 'v',
+      sentState: true
+    })
+    const loaded = await loadCodeVerifier(storage, 'k')
+    expect(loaded?.sentState).toBe(true)
+  })
+
+  it('no se guarda cuando la app no mandó ninguno', async () => {
+    const storage = inMemoryStorage()
+    await saveCodeVerifier(storage, 'k', { verifier: 'v' })
+    const loaded = await loadCodeVerifier(storage, 'k')
+    expect(loaded?.sentState).toBeUndefined()
+  })
+})

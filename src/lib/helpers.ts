@@ -86,13 +86,18 @@ export async function getCodeChallengeAndMethod(
   storage: SupportedStorage,
   storageKey: string,
   isPasswordRecovery = false,
-  returnTo?: string
+  returnTo?: string,
+  // Whether the caller put its own `state` in the authorize URL. Travels with
+  // the verifier so the callback knows whether the `state` it finds in the URL
+  // is the app's (keep it) or something the server added (wipe it).
+  sentState?: boolean
 ) {
   const codeVerifier = generatePKCEVerifier()
   await saveCodeVerifier(storage, `${storageKey}-code-verifier`, {
     verifier: codeVerifier,
     redirectType: isPasswordRecovery ? 'PASSWORD_RECOVERY' : undefined,
-    returnTo
+    returnTo,
+    sentState
   })
   const codeChallenge = await generatePKCEChallenge(codeVerifier)
   const codeChallengeMethod = codeVerifier === codeChallenge ? 'plain' : 'S256'

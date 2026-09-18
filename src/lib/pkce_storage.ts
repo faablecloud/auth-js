@@ -8,12 +8,19 @@ type StoredCodeVerifier = {
   createdAt: number
   redirectType?: string
   returnTo?: string
+  /**
+   * Whether the app put its own `state` in the authorize URL. Read back on
+   * the callback to decide if `state` may be wiped from the address bar —
+   * see `callbackParamsToClear`.
+   */
+  sentState?: boolean
 }
 
 type LoadedCodeVerifier = {
   verifier: string
   redirectType?: string
   returnTo?: string
+  sentState?: boolean
 }
 
 const isStoredCodeVerifier = (value: unknown): value is StoredCodeVerifier =>
@@ -29,11 +36,13 @@ export const saveCodeVerifier = async (
     verifier,
     redirectType,
     returnTo,
+    sentState,
     now = Date.now()
   }: {
     verifier: string
     redirectType?: string
     returnTo?: string
+    sentState?: boolean
     now?: number
   }
 ): Promise<void> => {
@@ -43,6 +52,9 @@ export const saveCodeVerifier = async (
   }
   if (returnTo) {
     payload.returnTo = returnTo
+  }
+  if (sentState) {
+    payload.sentState = true
   }
   await setItemAsync(storage, key, payload)
 }
@@ -68,6 +80,9 @@ export const loadCodeVerifier = async (
   }
   if (raw.returnTo) {
     loaded.returnTo = raw.returnTo
+  }
+  if (raw.sentState) {
+    loaded.sentState = true
   }
   return loaded
 }

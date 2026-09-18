@@ -64,7 +64,11 @@ import {
   FaableAuthClientConfig
 } from './lib/types'
 import { Session, SignOut } from './lib/types'
-import { clearURLParameters, parseParametersFromURL } from './lib/url_helpers'
+import {
+  callbackParamsToClear,
+  clearURLParameters,
+  parseParametersFromURL
+} from './lib/url_helpers'
 import { withTimeout } from './lib/with_timeout'
 import { Lock } from './lock/Lock'
 import { LockAcquireTimeoutError } from './lock/locks'
@@ -511,8 +515,9 @@ export class FaableAuthClient extends Base {
         const { data, error } = await this._exchangeCodeForSession(params.code)
         if (error) throw error
 
-        // Remove code (and the signup marker) from URL
-        clearURLParameters(['code', 'signup'])
+        // Remove code (and the signup marker) from URL — plus a `state` this
+        // client never sent, which can only have come from the server.
+        clearURLParameters(callbackParamsToClear({ sentState: data.sentState }))
 
         await this._promoteLoginAttempt()
 
@@ -646,6 +651,7 @@ export class FaableAuthClient extends Base {
           user: User
           redirectType: string | null
           returnTo: string | null
+          sentState: boolean
         }
         error: null
       }
@@ -655,6 +661,7 @@ export class FaableAuthClient extends Base {
           user: null
           redirectType: null
           returnTo: null
+          sentState: boolean
         }
         error: AuthError
       }
@@ -665,7 +672,15 @@ export class FaableAuthClient extends Base {
     )
     if (!stored) {
       return {
-        data: { user: null, session: null, redirectType: null, returnTo: null },
+        data: {
+          user: null,
+          session: null,
+          redirectType: null,
+          returnTo: null,
+          // Nothing is known about this flow, so assume the `state` in the URL
+          // is the app's and leave it alone.
+          sentState: true
+        },
         error: new AuthPKCEGrantCodeExchangeError(
           'No active PKCE code verifier — the authorization flow has expired or was not started'
         )
@@ -674,7 +689,8 @@ export class FaableAuthClient extends Base {
     const {
       verifier: codeVerifier,
       redirectType = null,
-      returnTo = null
+      returnTo = null,
+      sentState = false
     } = stored
 
     const rawResponse = await _post<Partial<RawAuthResponse>>(
@@ -698,12 +714,24 @@ export class FaableAuthClient extends Base {
 
     if (error) {
       return {
-        data: { user: null, session: null, redirectType: null, returnTo: null },
+        data: {
+          user: null,
+          session: null,
+          redirectType: null,
+          returnTo: null,
+          sentState
+        },
         error
       }
     } else if (!data || !data.session || !data.user) {
       return {
-        data: { user: null, session: null, redirectType: null, returnTo: null },
+        data: {
+          user: null,
+          session: null,
+          redirectType: null,
+          returnTo: null,
+          sentState
+        },
         error: new AuthInvalidTokenResponseError()
       }
     }
@@ -727,7 +755,11 @@ export class FaableAuthClient extends Base {
       data: {
         ...data,
         redirectType: redirectType ?? null,
-        returnTo: returnTo ?? null
+        returnTo: returnTo ?? null,
+        // ⚠️ Not optional here: this object is cast `as any`, so forgetting it
+        // makes `sentState` undefined at the call site — which reads as "the
+        // app sent no state" and wipes a `state` that IS the app's.
+        sentState
       } as any,
       error
     }
@@ -1095,12 +1127,18 @@ export class FaableAuthClient extends Base {
     }
 
     if (this.flowType === 'pkce') {
+      // Did the APP put a `state` in this authorize URL? Remembered alongside
+      // the verifier, because on the way back it is the only way to tell the
+      // app's own `state` (keep it: it is theirs to read) from one the server
+      // added (wipe it). See `callbackParamsToClear`.
+      const sentState = urlParams.state !== undefined
       const [codeChallenge, codeChallengeMethod] =
         await getCodeChallengeAndMethod(
           this.storage,
           this.storageKey,
           false,
-          params.returnTo
+          params.returnTo,
+          sentState
         )
 
       urlParams = {
