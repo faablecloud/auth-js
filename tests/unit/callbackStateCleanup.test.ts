@@ -63,7 +63,13 @@ const tokenResponse = () => ({
   user: { sub: 'user_1', id: 'user_1' }
 })
 
-const landOn = async ({ sentState }: { sentState: boolean }) => {
+const landOn = async ({
+  sentState,
+  appState
+}: {
+  sentState: boolean
+  appState?: unknown
+}) => {
   h.loc.href =
     'https://app.example.com/area-privada?code=code_abc&state=a2dd7d12-b39b-4ad8-8300-3c0eebc2a478'
 
@@ -74,7 +80,8 @@ const landOn = async ({ sentState }: { sentState: boolean }) => {
     'faable-auth-token-test-client-code-verifier',
     {
       verifier: 'verifier_abc',
-      ...(sentState ? { sentState: true } : {})
+      ...(sentState ? { sentState: true } : {}),
+      ...(appState !== undefined ? { appState } : {})
     }
   )
 
@@ -92,8 +99,8 @@ const landOn = async ({ sentState }: { sentState: boolean }) => {
     flowType: 'pkce'
   } as any)
 
-  await auth.handleRedirectCallback()
-  return new URL(h.loc.href)
+  const result = await auth.handleRedirectCallback()
+  return { url: new URL(h.loc.href), result }
 }
 
 beforeEach(() => {
@@ -104,19 +111,48 @@ beforeEach(() => {
 
 describe('limpieza de la URL al volver del login', () => {
   it('borra un `state` que este cliente no mandó', async () => {
-    const url = await landOn({ sentState: false })
+    const { url } = await landOn({ sentState: false })
 
     expect(url.searchParams.get('code')).toBeNull()
     expect(url.searchParams.get('state')).toBeNull()
   })
 
   it('deja intacto el `state` de la app', async () => {
-    const url = await landOn({ sentState: true })
+    const { url } = await landOn({ sentState: true })
 
     expect(url.searchParams.get('code')).toBeNull()
     // Esto es lo que lee CORE al aterrizar. Si desaparece, pierde el dato.
     expect(url.searchParams.get('state')).toBe(
       'a2dd7d12-b39b-4ad8-8300-3c0eebc2a478'
     )
+  })
+})
+
+// `appState`: la alternativa a que la app meta sus datos en el `state` de
+// OAuth. Va y vuelve por el navegador, nunca por la URL.
+describe('appState', () => {
+  it('vuelve ya deserializado, con su forma', async () => {
+    const { result } = await landOn({
+      sentState: false,
+      appState: { course_key: 'abc', steps: [1, 2] }
+    })
+
+    expect(result.appState).toEqual({ course_key: 'abc', steps: [1, 2] })
+  })
+
+  it('no aparece en la URL en ningún momento', async () => {
+    const { url } = await landOn({
+      sentState: false,
+      appState: { course_key: 'abc' }
+    })
+
+    expect(url.search).toBe('')
+    expect(url.href).not.toContain('course_key')
+  })
+
+  it('sin `appState` el resultado no se inventa uno', async () => {
+    const { result } = await landOn({ sentState: false })
+
+    expect(result.appState).toBeUndefined()
   })
 })

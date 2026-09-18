@@ -133,3 +133,36 @@ describe('sentState', () => {
     expect(loaded?.sentState).toBeUndefined()
   })
 })
+
+// `appState`: lo que la app quiere llevarse por el login. Va donde va
+// `returnTo` —junto al verifier, en el navegador— y no por la URL.
+describe('appState', () => {
+  it('sobrevive el viaje de ida y vuelta, con su forma', async () => {
+    const storage = inMemoryStorage()
+    await saveCodeVerifier(storage, 'k', {
+      verifier: 'v',
+      appState: { course_key: 'abc', nested: [1, 2] }
+    })
+    const loaded = await loadCodeVerifier(storage, 'k')
+    expect(loaded?.appState).toEqual({ course_key: 'abc', nested: [1, 2] })
+  })
+
+  it('distingue «no mandó nada» de «mandó null»', async () => {
+    const storage = inMemoryStorage()
+    await saveCodeVerifier(storage, 'sin', { verifier: 'v' })
+    await saveCodeVerifier(storage, 'nulo', { verifier: 'v', appState: null })
+
+    expect((await loadCodeVerifier(storage, 'sin'))?.appState).toBeUndefined()
+    expect((await loadCodeVerifier(storage, 'nulo'))?.appState).toBeNull()
+  })
+
+  it('se va con el verifier cuando caduca', async () => {
+    const storage = inMemoryStorage()
+    await saveCodeVerifier(storage, 'k', {
+      verifier: 'v',
+      appState: { course_key: 'abc' },
+      now: Date.now() - CODE_VERIFIER_TTL_MS - 1
+    })
+    expect(await loadCodeVerifier(storage, 'k')).toBeNull()
+  })
+})

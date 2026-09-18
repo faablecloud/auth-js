@@ -483,6 +483,19 @@ export type SignInWithOAuthConnection = {
    * {@link FaableAuthClient.handleRedirectCallback} / {@link FaableAuthClient.initialize}.
    */
   returnTo?: string
+  /**
+   * Cualquier valor serializable que la app quiera recuperar al volver del
+   * login (el número de curso que estaba comprando, el formulario a medio
+   * rellenar, de dónde venía). Se guarda **en el navegador**, junto al
+   * verifier de PKCE: no viaja en la URL y el servidor no lo ve nunca.
+   *
+   * Vuelve ya deserializado en `appState`, en el resultado de
+   * {@link FaableAuthClient.handleRedirectCallback} / {@link FaableAuthClient.initialize}.
+   *
+   * Prefiérelo a meter tus datos en `queryParams.state`: ese parámetro es del
+   * protocolo, viaja por la URL y se queda en el historial.
+   */
+  appState?: unknown
   /** A space-separated list of scopes granted to the OAuth application. */
   scopes?: string
   /** An object of query params */
@@ -709,6 +722,23 @@ export type InitializeResult = {
    * redirect was consumed (session recovered from storage).
    */
   is_new_user?: boolean
+  /**
+   * Lo que la app pidió llevarse cuando arrancó el login (`appState`), ya
+   * deserializado. Nunca viaja por la URL ni llega al servidor: se guarda en
+   * el navegador junto al verifier de PKCE, igual que `returnTo`, y se borra
+   * con él.
+   *
+   * Es la alternativa a meter datos propios en el `state` de OAuth, que es
+   * del protocolo y no de la aplicación.
+   *
+   * @example
+   * ```ts
+   * await auth.signInWithOauthConnection({ appState: { course_key } })
+   * // ...de vuelta:
+   * const { appState } = await auth.handleRedirectCallback()
+   * ```
+   */
+  appState?: unknown
 }
 
 export type UserResponse =

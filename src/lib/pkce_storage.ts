@@ -14,6 +14,11 @@ type StoredCodeVerifier = {
    * see `callbackParamsToClear`.
    */
   sentState?: boolean
+  /**
+   * Lo que la app quiso llevarse por el login. Nunca sale del navegador: no
+   * viaja en la URL ni llega al servidor, igual que `returnTo`.
+   */
+  appState?: unknown
 }
 
 type LoadedCodeVerifier = {
@@ -21,6 +26,7 @@ type LoadedCodeVerifier = {
   redirectType?: string
   returnTo?: string
   sentState?: boolean
+  appState?: unknown
 }
 
 const isStoredCodeVerifier = (value: unknown): value is StoredCodeVerifier =>
@@ -37,12 +43,14 @@ export const saveCodeVerifier = async (
     redirectType,
     returnTo,
     sentState,
+    appState,
     now = Date.now()
   }: {
     verifier: string
     redirectType?: string
     returnTo?: string
     sentState?: boolean
+    appState?: unknown
     now?: number
   }
 ): Promise<void> => {
@@ -55,6 +63,11 @@ export const saveCodeVerifier = async (
   }
   if (sentState) {
     payload.sentState = true
+  }
+  // `undefined` no: distingue «no mandó nada» de «mandó null», y además
+  // setItemAsync serializa a JSON, donde un undefined desaparece solo.
+  if (appState !== undefined) {
+    payload.appState = appState
   }
   await setItemAsync(storage, key, payload)
 }
@@ -83,6 +96,9 @@ export const loadCodeVerifier = async (
   }
   if (raw.sentState) {
     loaded.sentState = true
+  }
+  if (raw.appState !== undefined) {
+    loaded.appState = raw.appState
   }
   return loaded
 }

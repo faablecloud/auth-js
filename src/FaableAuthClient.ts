@@ -436,7 +436,7 @@ export class FaableAuthClient extends Base {
           return { error }
         }
 
-        const { session, redirectType, returnTo, is_new_user } = data
+        const { session, redirectType, returnTo, is_new_user, appState } = data
 
         this._debug(
           '#_initialize()',
@@ -456,7 +456,7 @@ export class FaableAuthClient extends Base {
           }
         }, 0)
 
-        return { error: null, redirectType, returnTo, is_new_user }
+        return { error: null, redirectType, returnTo, is_new_user, appState }
       }
       // no login attempt via callback url try to recover session from storage
       await this._recoverAndRefresh()
@@ -488,6 +488,7 @@ export class FaableAuthClient extends Base {
           redirectType: string | null
           returnTo: string | null
           is_new_user: boolean
+          appState?: unknown
         }
         error: null
       }
@@ -497,6 +498,7 @@ export class FaableAuthClient extends Base {
           redirectType: null
           returnTo: null
           is_new_user: false
+          appState?: unknown
         }
         error: AuthError
       }
@@ -526,7 +528,8 @@ export class FaableAuthClient extends Base {
             session: data.session,
             redirectType: data.redirectType,
             returnTo: data.returnTo,
-            is_new_user
+            is_new_user,
+            appState: data.appState
           },
           error: null
         }
@@ -652,6 +655,7 @@ export class FaableAuthClient extends Base {
           redirectType: string | null
           returnTo: string | null
           sentState: boolean
+          appState?: unknown
         }
         error: null
       }
@@ -662,6 +666,7 @@ export class FaableAuthClient extends Base {
           redirectType: null
           returnTo: null
           sentState: boolean
+          appState?: unknown
         }
         error: AuthError
       }
@@ -690,7 +695,8 @@ export class FaableAuthClient extends Base {
       verifier: codeVerifier,
       redirectType = null,
       returnTo = null,
-      sentState = false
+      sentState = false,
+      appState
     } = stored
 
     const rawResponse = await _post<Partial<RawAuthResponse>>(
@@ -719,7 +725,8 @@ export class FaableAuthClient extends Base {
           session: null,
           redirectType: null,
           returnTo: null,
-          sentState
+          sentState,
+          appState
         },
         error
       }
@@ -730,7 +737,8 @@ export class FaableAuthClient extends Base {
           session: null,
           redirectType: null,
           returnTo: null,
-          sentState
+          sentState,
+          appState
         },
         error: new AuthInvalidTokenResponseError()
       }
@@ -759,7 +767,8 @@ export class FaableAuthClient extends Base {
         // ⚠️ Not optional here: this object is cast `as any`, so forgetting it
         // makes `sentState` undefined at the call site — which reads as "the
         // app sent no state" and wipes a `state` that IS the app's.
-        sentState
+        sentState,
+        appState
       } as any,
       error
     }
@@ -1114,6 +1123,7 @@ export class FaableAuthClient extends Base {
       queryParams?: { [key: string]: string }
       skipBrowserRedirect?: boolean
       audience?: string
+      appState?: unknown
     }
   ) {
     let urlParams: Record<string, any> = params.queryParams || {}
@@ -1138,7 +1148,7 @@ export class FaableAuthClient extends Base {
           this.storageKey,
           false,
           params.returnTo,
-          sentState
+          { sentState, appState: params.appState }
         )
 
       urlParams = {
@@ -1209,7 +1219,8 @@ export class FaableAuthClient extends Base {
       scopes: credentials?.scopes,
       queryParams: credentials.queryParams,
       skipBrowserRedirect: credentials.skipBrowserRedirect,
-      audience: credentials.audience
+      audience: credentials.audience,
+      appState: credentials.appState
     })
   }
 
@@ -1261,6 +1272,7 @@ export class FaableAuthClient extends Base {
         : credentials.queryParams,
       skipBrowserRedirect: credentials.skipBrowserRedirect,
       audience: credentials.audience,
+      appState: credentials.appState,
       link: true
     })
   }
@@ -1956,6 +1968,7 @@ export class FaableAuthClient extends Base {
     queryParams?: { [key: string]: string }
     skipBrowserRedirect?: boolean
     audience?: string
+    appState?: unknown
     // Link mode: `/authorize?link=true` attaches the resulting identity to
     // the ACTIVE session user instead of signing in/up. See
     // linkOauthConnection().
@@ -1973,7 +1986,8 @@ export class FaableAuthClient extends Base {
         queryParams: options.link
           ? { ...(options.queryParams ?? {}), link: 'true' }
           : options.queryParams,
-        audience: options.audience
+        audience: options.audience,
+        appState: options.appState
       }
     )
 
