@@ -40,9 +40,13 @@ describe('BroadcastSync', () => {
     })
 
     await a.notify('TOKEN_REFRESHED', fakeSession)
-    await new Promise(r => setTimeout(r, 0))
 
-    expect(received).toEqual([{ event: 'TOKEN_REFRESHED', hasSession: true }])
+    // Delivery between channels is asynchronous with no promised deadline:
+    // one `setTimeout(0)` was enough up to Node 24.20 and is not on 24.21.
+    // Wait for the message, not for a number of ticks.
+    await vi.waitFor(() =>
+      expect(received).toEqual([{ event: 'TOKEN_REFRESHED', hasSession: true }])
+    )
     a.close()
     b.close()
   })
@@ -56,8 +60,7 @@ describe('BroadcastSync', () => {
     a.subscribe(aSpy)
 
     await b.notify('SIGNED_IN', fakeSession)
-    await new Promise(r => setTimeout(r, 0))
-    expect(aSpy).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => expect(aSpy).toHaveBeenCalledTimes(1))
 
     aSpy.mockClear()
     await new Promise(r => setTimeout(r, 10))
