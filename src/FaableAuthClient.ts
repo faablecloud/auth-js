@@ -1880,6 +1880,16 @@ export class FaableAuthClient extends Base {
        */
       acr_values?: string | string[]
       /**
+       * The methods the hosted login screen shows for this login — connection
+       * ids or names, and `'passkey'`. Each must be one the client already
+       * offers; the screen keeps the order configured for the client. Use it
+       * to open the same client with fewer options, e.g. only the emailed code:
+       * `loginMethods: ['email']`. It narrows the screen; `connection` skips it
+       * for a single connection instead, and the two cannot be combined.
+       * @see {@link https://faable.com/docs/auth/hosted-login | Hosted Login UI}
+       */
+      loginMethods?: string | string[]
+      /**
        * Extra `/authorize` params merged in as-is — e.g.
        * `{ prompt: 'select_account' }` or `{ prompt: 'login' }` to force
        * account selection / re-authentication even when an SSO session exists.
@@ -1899,7 +1909,10 @@ export class FaableAuthClient extends Base {
       // Space-delimited, per OIDC Core §3.1.2.1.
       acr_values: Array.isArray(options.acr_values)
         ? options.acr_values.join(' ')
-        : options.acr_values
+        : options.acr_values,
+      login_methods: Array.isArray(options.loginMethods)
+        ? options.loginMethods.join(',')
+        : options.loginMethods
     }
 
     const definedParams = Object.fromEntries(
@@ -1960,6 +1973,8 @@ export class FaableAuthClient extends Base {
     audience?: string
     /** See {@link FaableAuthClient.buildAuthorizeUrl}. */
     acr_values?: string | string[]
+    /** See {@link FaableAuthClient.buildAuthorizeUrl}. */
+    loginMethods?: string | string[]
     queryParams?: { [key: string]: string }
   }) {
     const url = this.buildAuthorizeUrl(options)

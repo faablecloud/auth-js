@@ -123,6 +123,40 @@ describe('buildAuthorizeUrl acr_values', () => {
   })
 })
 
+describe('buildAuthorizeUrl loginMethods', () => {
+  it('sends the methods as login_methods, comma-separated', () => {
+    const url = new URL(
+      client().buildAuthorizeUrl({ loginMethods: ['email', 'passkey'] })
+    )
+    expect(url.searchParams.get('login_methods')).toBe('email,passkey')
+  })
+
+  it('takes a single method as a string', () => {
+    const url = new URL(client().buildAuthorizeUrl({ loginMethods: 'email' }))
+    expect(url.searchParams.get('login_methods')).toBe('email')
+  })
+
+  it('omits the parameter when not asked for', () => {
+    const url = new URL(client().buildAuthorizeUrl())
+    expect(url.searchParams.has('login_methods')).toBe(false)
+  })
+
+  it('authorize() carries it to the URL it redirects to', () => {
+    const auth = client()
+    const spy = vi.spyOn(auth, 'buildAuthorizeUrl')
+    try {
+      auth.authorize({ response_type: 'code', loginMethods: ['email'] })
+    } catch {
+      // The mocked window cannot navigate; only the URL matters here.
+    }
+    expect(
+      new URL(spy.mock.results[0].value as string).searchParams.get(
+        'login_methods'
+      )
+    ).toBe('email')
+  })
+})
+
 describe('stepUp', () => {
   it('asks for loa:2 AND a fresh login', () => {
     const auth = client()
