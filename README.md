@@ -155,8 +155,15 @@ the previous user, ignoring the requested connection.
 await auth.signOut() // clears local + redirects to /logout to clear the SSO cookie
 await auth.signOut({ returnTo: 'https://app.example.com/bye' }) // + landing page
 await auth.signOut({ scope: 'local' }) // only this device's storage, no redirect
+await auth.signOut({ scope: 'others' }) // every OTHER device; this one stays signed in
 await auth.signOut({ redirect: false }) // legacy: local + best-effort fetch, no nav
 ```
+
+Scopes: `global` (default) ends **this browser's** session at the auth server —
+every refresh token issued in it is refused from then on — and, in a browser,
+navigates to `/logout`. `local` only clears storage; the server is not told.
+`others` calls `POST /me/sessions/revoke-others`: every other session of the
+user ends, the local one stays, and no `SIGNED_OUT` fires.
 
 `returnTo` maps to the OIDC `post_logout_redirect_uri` and **must be registered
 as a logout URL on the client**, or the server responds `400`.
@@ -170,6 +177,31 @@ window.location.assign(
   auth.getLogoutUrl({ returnTo: 'https://app.example.com' })
 )
 ```
+
+### A token without a login screen
+
+`getTokenSilently()` returns a live access token or the reason there cannot be
+one. It refreshes first (`refresh_token` grant, no navigation); when the refresh
+is refused — no session, or the session was revoked by a sign-out elsewhere, an
+admin, or a back-channel logout — it sends the browser through
+`/authorize?prompt=none` as a **top-level navigation** (no iframe: third-party
+cookie blocking makes one unreliable). The auth server signs the user back in
+from its SSO cookie without a screen and lands on your `redirectUri`, with the
+user's location in `returnTo`. On that path the promise never resolves.
+
+```ts
+const { data, error } = await auth.getTokenSilently()
+if (error) {
+  // `login_required`: the SSO session is gone too — show a login.
+  if (error.code === 'login_required') auth.authorize({ response_type: 'code' })
+  return
+}
+fetch('/api/me', { headers: { Authorization: `Bearer ${data.access_token}` } })
+```
+
+Pass `{ redirect: false }` to get `AuthLoginRequiredError` instead of the
+navigation. A page load that is itself the return of a refused silent attempt
+(`?error=login_required`) never navigates again.
 
 ## Error handling
 
@@ -340,70 +372,88 @@ createClient({ domain, clientId, storage: memoryStorage })
 
 ## Next.js / server-side
 
-Use `storage: 'cookie'` on the client, then read the session on the server with
-`getSessionFromCookies`. It returns the full `Session` (`access_token`,
-`refresh_token`, `expires_at`, `user`) or `null`, and accepts the `cookies()`
-object from `next/headers`, a `NextRequest.cookies` object, or a plain
-`{ name: value }` map.
-
-`getSessionFromCookies` is **async** — always `await` it. In Next.js 15+,
-`cookies()` is also async, so `await` that too:
+`@faable/auth-js/nextjs` runs the login on the **server**: App Router handlers
+for `login`, `callback`, `logout` and `backchannel-logout`, an `HttpOnly`
+encrypted session cookie the browser cannot read, `id_token` and `logout_token`
+verified against the tenant JWKS (`jose`), and a `getAccessToken()` that
+refreshes on the server. Requires Node 20+ or the Edge runtime, and `next` 13+.
 
 ```ts
-// app/page.tsx (Next.js 15+)
-import { cookies } from 'next/headers'
-import { getSessionFromCookies } from '@faable/auth-js'
+// lib/faable-auth.ts
+import { createFaableAuth } from '@faable/auth-js/nextjs'
 
-export default async function Page() {
-  const session = await getSessionFromCookies(await cookies(), {
-    clientId: '<client_id>'
-  })
-  if (!session) return <SignIn />
-  return <Dashboard user={session.user} />
+export const faableAuth = createFaableAuth({
+  domain: process.env.FAABLE_AUTH_DOMAIN!, // your-tenant.auth.faable.link
+  clientId: process.env.FAABLE_AUTH_CLIENT_ID!,
+  clientSecret: process.env.FAABLE_AUTH_CLIENT_SECRET, // confidential clients only
+  secret: process.env.FAABLE_AUTH_SECRET!, // ≥ 32 chars; encrypts the cookie
+  baseUrl: process.env.FAABLE_AUTH_BASE_URL! // https://app.example.com
+})
+// Every field also reads the FAABLE_AUTH_* environment variable of the same name.
+```
+
+```ts
+// app/auth/[...faable]/route.ts
+import { faableAuth } from '@/lib/faable-auth'
+
+export const { GET, POST } = faableAuth.handlers
+```
+
+Register `https://app.example.com/auth/callback` as an allowed callback URL,
+`https://app.example.com/` (or your `returnTo` page) as a logout URL, and
+`https://app.example.com/auth/backchannel-logout` as the client's
+`backchannel_logout_uri`. Then link to `/auth/login?returnTo=/dashboard` and
+`/auth/logout`.
+
+```tsx
+// app/dashboard/page.tsx — Server Component
+import { redirect } from 'next/navigation'
+import { faableAuth } from '@/lib/faable-auth'
+
+export default async function Dashboard() {
+  const session = await faableAuth.getSession()
+  if (!session) redirect('/auth/login?returnTo=/dashboard')
+  return <h1>Hello {session.user.email}</h1>
 }
 ```
 
-On Next.js 14 and earlier `cookies()` is synchronous — drop the inner `await`
-(`await getSessionFromCookies(cookies(), …)`).
-
-### Gating routes in middleware (Edge)
-
-To keep protected content from ever reaching the browser without a session, gate
-it in `middleware.ts`. Pass `req.cookies` (a `NextRequest.cookies` object)
-directly:
-
 ```ts
-// middleware.ts
-import { NextRequest, NextResponse } from 'next/server'
-import { getSessionFromCookies } from '@faable/auth-js'
-
-export async function middleware(req: NextRequest) {
-  const session = await getSessionFromCookies(req.cookies, {
-    clientId: '<client_id>'
+// app/api/orders/route.ts — call an API on the user's behalf
+export async function GET() {
+  const token = await faableAuth.getAccessToken() // refreshes when needed
+  if (!token) return new Response(null, { status: 401 })
+  return fetch('https://api.example.com/orders', {
+    headers: { Authorization: `Bearer ${token.accessToken}` }
   })
-  if (!session) return NextResponse.redirect(new URL('/login', req.url))
-  return NextResponse.next()
 }
-
-export const config = { matcher: ['/((?!login|_next|favicon.ico).*)'] }
 ```
 
-Pass the same `clientId` you used in `createClient`. If you also passed a custom
-`storageKey` to `createClient`, mirror it here as `{ clientId, storageKey }` so
-the helper looks at the same cookie.
+```ts
+// middleware.ts — keep the session fresh, gate a section
+import type { NextRequest } from 'next/server'
+import { faableAuth } from '@/lib/faable-auth'
 
-> **Security note.** This library writes the session cookie from JavaScript, so
-> it **cannot** be `HttpOnly` — an XSS can read the `access_token`. Treat XSS
-> prevention (CSP, escaping) as a hard requirement. The cookie may also be
-> **chunked** across `faableauth-<clientId>.0`, `.1`, … when large;
-> `getSessionFromCookies` reassembles the chunks for you, but any code that
-> reads the cookie by hand (another backend, an edge worker) must rejoin them.
+export const middleware = (req: NextRequest) =>
+  faableAuth.middleware(req, {
+    protect: req => req.nextUrl.pathname.startsWith('/dashboard')
+  })
+export const config = { matcher: ['/((?!_next|favicon.ico).*)'] }
+```
 
-> **`returnTo` vs `redirectTo`.** Don't embed `returnTo` inside the `redirectTo`
-> query (e.g. `redirectTo: '/callback?returnTo=/x'`) — pass `returnTo` as its
-> own option (`signInWith…({ returnTo: '/x' })`). The SDK stores it locally next
-> to the PKCE verifier and round-trips it back to you; keep `redirectTo` a clean
-> URL with no query.
+When the user signs out of another app in the same SSO session, the auth server
+POSTs a `logout_token` to `/auth/backchannel-logout`; the helper verifies it
+and, from then on, `getSession()` returns `null` for that session even though
+the browser still sends the cookie. The record lives in a `SessionStore` — in
+memory by default (one process); pass your own over Redis when the app runs on
+several instances.
+
+### Legacy: `getSessionFromCookies` (deprecated)
+
+The browser SDK with `storage: 'cookie'` writes a cookie the server can parse
+with `getSessionFromCookies`. It is **not `HttpOnly` and not verified** — any
+script on the page, or a forged request, can put an arbitrary session in it — so
+use it for convenience only, never as authorization. New apps use the
+`@faable/auth-js/nextjs` entry above.
 
 ## Documentation
 

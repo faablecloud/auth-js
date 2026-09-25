@@ -194,6 +194,31 @@ export class AuthImplicitGrantRedirectError extends CustomAuthError {
   }
 }
 
+/**
+ * A silent authentication could not produce a token without showing a login
+ * screen: there is no session to refresh and either the caller opted out of
+ * the `prompt=none` navigation, the runtime cannot navigate (no browser), or
+ * the auth server already answered `login_required` on this page load.
+ * `code` carries the OIDC error (`login_required`, `interaction_required`,
+ * `consent_required`, `account_selection_required`).
+ */
+export class AuthLoginRequiredError extends CustomAuthError {
+  constructor(code: string = 'login_required', message?: string) {
+    super(
+      message ?? `Silent authentication failed: ${code}`,
+      'AuthLoginRequiredError',
+      401,
+      code
+    )
+  }
+}
+
+export function isAuthLoginRequiredError(
+  error: unknown
+): error is AuthLoginRequiredError {
+  return isAuthError(error) && error.name === 'AuthLoginRequiredError'
+}
+
 export class AuthPKCEGrantCodeExchangeError extends CustomAuthError {
   details: { error: string; code: string } | null = null
 

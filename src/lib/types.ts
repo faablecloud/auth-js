@@ -667,14 +667,48 @@ export interface Subscription {
  *
  * @see {@link https://faable.com/docs/auth/oidc/logout | Logout}
  */
+/**
+ * Options for {@link FaableAuthClient.getTokenSilently}.
+ */
+export type GetTokenSilently = {
+  /**
+   * Where the `prompt=none` round-trip lands (the OAuth `redirect_uri`).
+   * Defaults to the client's `redirectUri`, then `window.location.origin`.
+   * Keep it a clean URL: the user's actual location travels as `returnTo`.
+   */
+  redirectTo?: string
+  /**
+   * Where the app should put the user back after the round-trip. Comes back
+   * as `returnTo` in the {@link FaableAuthClient.initialize} result — never
+   * in the URL. Defaults to the current `window.location.href`.
+   */
+  returnTo?: string
+  /** Scope for the token, when different from the client's default. */
+  scope?: string
+  /** Audience (Api identifier) for the access token. */
+  audience?: string
+  /** Data to carry across the round-trip, like `signInWith…({ appState })`. */
+  appState?: unknown
+  /** Extra `/authorize` params merged in as-is. `prompt` is always `none`. */
+  queryParams?: { [key: string]: string }
+  /**
+   * `false` never navigates: when the refresh is refused the call resolves
+   * with an `AuthLoginRequiredError` instead of starting the `prompt=none`
+   * round-trip. Defaults to `true` in a browser.
+   */
+  redirect?: boolean
+}
+
 export type SignOut = {
   /**
    * Which sessions to log out.
    *
-   * - `'global'` — every refresh token for the user (default)
-   * - `'local'` — only this client's storage
-   * - `'others'` — every other session except this device's; no
-   *   `SIGNED_OUT` event is fired locally
+   * - `'global'` — this browser's session at the auth server (its refresh
+   *   tokens are refused from then on) plus this client's storage (default)
+   * - `'local'` — only this client's storage; the server is not told
+   * - `'others'` — every other session of the user except this one
+   *   (`POST /me/sessions/revoke-others`); the local session stays and no
+   *   `SIGNED_OUT` event is fired
    */
   scope?: 'global' | 'local' | 'others'
   /**

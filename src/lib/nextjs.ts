@@ -4,6 +4,14 @@ import { Session } from './types'
 /**
  * Reads the persisted session from cookies on the server.
  *
+ * @deprecated The cookie this reads is written by the browser SDK, so it is
+ * not `HttpOnly` and its content is **not verified**: anything on the page —
+ * or a request that forges the cookie — can put an arbitrary `Session` in it.
+ * Use it for convenience only, never as authorization. For server-side auth
+ * in Next.js use `@faable/auth-js/nextjs`: an `HttpOnly`, encrypted cookie
+ * the server writes itself, tokens verified against the tenant JWKS, and a
+ * back-channel logout receiver.
+ *
  * Pair this with the cookie storage adapter on the client: when the browser
  * stores its session under the cookie shared with the server, the same
  * `clientId` lets the server reconstruct it. Mirrors how the browser

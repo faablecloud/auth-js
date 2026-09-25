@@ -106,6 +106,8 @@ const plugins = es5 => [
       name: pkg.name,
       main: pkg.main,
       dependencies: pkg.dependencies || {},
+      peerDependencies: pkg.peerDependencies,
+      peerDependenciesMeta: pkg.peerDependenciesMeta,
       types: pkg.types,
       exports: pkg.exports,
       sideEffects: pkg.sideEffects,
@@ -180,4 +182,35 @@ const entrypointTargets = entrypoints.map(file => {
   }
 })
 
-export default [...entrypointTargets]
+// `@faable/auth-js/nextjs` — server code (Route Handlers, middleware, Server
+// Components), not a browser bundle: modern output, `jose` stays a runtime
+// dependency and `next/*` is the host app's. Built from its own tsconfig so
+// the ES5 settings of the browser bundles never touch it.
+const nextjsTarget = {
+  input: 'src/nextjs/index.ts',
+  external: ['jose', 'next/headers', 'next/server'],
+  output: [
+    {
+      file: 'pkg/dist/nextjs.js',
+      format: 'es',
+      sourcemap: true,
+      banner
+    }
+  ],
+  plugins: [
+    typescript({
+      tsconfig: './tsconfig.nextjs.json',
+      sourceMap: true,
+      outDir: './pkg/dist',
+      declarationDir: 'pkg/dist/dts'
+    }),
+    replace({
+      preventAssignment: true,
+      'process.env.VERSION': JSON.stringify(pkg.version)
+    }),
+    isProduction && terser({ toplevel: true, compress: { ecma: 2020 } }),
+    filesize()
+  ]
+}
+
+export default [...entrypointTargets, nextjsTarget]

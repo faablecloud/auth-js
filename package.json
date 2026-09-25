@@ -19,6 +19,10 @@
       "types": "./dist/dts/entrypoints/main.es.d.ts",
       "default": "./dist/main.js"
     },
+    "./nextjs": {
+      "types": "./dist/dts/nextjs/index.d.ts",
+      "default": "./dist/nextjs.js"
+    },
     "./package.json": "./package.json"
   },
   "sideEffects": false,
@@ -82,7 +86,16 @@
   "engines": {
     "node": ">=22.8"
   },
-  "files": [
-    "dist/*"
-  ]
+  "files": ["dist/*"],
+  "dependencies": {
+    "jose": "^6.2.12"
+  },
+  "peerDependencies": {
+    "next": ">=13"
+  },
+  "peerDependenciesMeta": {
+    "next": {
+      "optional": true
+    }
+  }
 }

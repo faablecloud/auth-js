@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "es2020",
+    "module": "esnext",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "moduleResolution": "bundler",
+    "jsx": "preserve",
+    "rootDir": "src"
+  },
+  "include": ["src/nextjs"],
+  "exclude": []
+}

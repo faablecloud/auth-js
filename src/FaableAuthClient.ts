@@ -8,6 +8,7 @@ import {
   AuthError,
   AuthImplicitGrantRedirectError,
   AuthInvalidTokenResponseError,
+  AuthLoginRequiredError,
   AuthPKCEGrantCodeExchangeError,
   AuthRetryableFetchError,
   AuthSessionMissingError,
@@ -49,6 +50,7 @@ import {
   AuthFlowType,
   AuthResult,
   CallRefreshTokenResult,
+  GetTokenSilently,
   InitializeResult,
   JwtClaims,
   LastUsedCookieOptions,
@@ -73,6 +75,15 @@ import { withTimeout } from './lib/with_timeout'
 import { Lock } from './lock/Lock'
 import { LockAcquireTimeoutError } from './lock/locks'
 import { getDomain, getTokenIssuer } from './utils'
+
+// OIDC Core §3.1.2.6 — the errors a `prompt=none` request comes back with
+// when the server could not sign the user in without a screen.
+const SILENT_AUTH_ERRORS = [
+  'login_required',
+  'interaction_required',
+  'consent_required',
+  'account_selection_required'
+]
 
 export { cookieStorageAdapter, getSessionFromCookies }
 
@@ -2039,6 +2050,9 @@ export class FaableAuthClient extends Base {
     // the ACTIVE session user instead of signing in/up. See
     // linkOauthConnection().
     link?: boolean
+    // Silent mode (`prompt=none`, getTokenSilently): a re-authentication the
+    // user never sees, so it must not count as their "last used" login.
+    silent?: boolean
   }) {
     const url: string = await this._getUrlForConnection(
       `${this.domainUrl}/authorize`,
@@ -2063,7 +2077,7 @@ export class FaableAuthClient extends Base {
     // the navigation path, so there is no "after". Skipped in link mode: a
     // connect round-trip is not how the user signs in, so it must not flip
     // the "last used login method" hint.
-    if (!options.link) {
+    if (!options.link && !options.silent) {
       await this._saveLoginAttempt({
         method: 'oauth',
         connection: options.connection,
@@ -2895,11 +2909,16 @@ export class FaableAuthClient extends Base {
    * {@link FaableAuthClient.getLogoutUrl} to drive the navigation yourself.
    *
    * Scopes:
-   * - `'global'` (default) — invalidate all refresh tokens for the user and,
-   *   in a browser, redirect to `/logout` to clear the SSO cookie
-   * - `'local'` — only clear this client's storage (no redirect)
-   * - `'others'` — invalidate every refresh token except this device's; no
-   *   `SIGNED_OUT` event is fired locally (no redirect)
+   * - `'global'` (default) — ends **this browser's** session at the auth
+   *   server: every refresh token issued in it is refused from then on, and
+   *   in a browser the page navigates to `/logout` to clear the SSO cookie.
+   *   Sessions on other devices are untouched — that is what `'others'` is
+   *   for.
+   * - `'local'` — only clear this client's storage. Nothing is sent to the
+   *   server: the SSO session and its refresh tokens stay valid (no redirect).
+   * - `'others'` — `POST /me/sessions/revoke-others`: ends every session of
+   *   the user **except this one**. The local session stays, no `SIGNED_OUT`
+   *   event is fired and there is no redirect. Needs a live access token.
    *
    * @example
    * ```ts
@@ -2907,6 +2926,7 @@ export class FaableAuthClient extends Base {
    * await auth.signOut({ returnTo: 'https://app.example.com/bye' }) // + landing
    * await auth.signOut({ redirect: false }) // legacy: local + best-effort fetch
    * await auth.signOut({ scope: 'local' }) // only this device, no redirect
+   * await auth.signOut({ scope: 'others' }) // every other device, stay signed in
    * ```
    * @see {@link https://faable.com/docs/auth/oidc/logout | Logout}
    * @category Sign out
@@ -2930,6 +2950,26 @@ export class FaableAuthClient extends Base {
         return { error: sessionError }
       }
 
+      // "Everywhere but here": the server revokes the user's other sessions
+      // and this one stays exactly as it is — no local teardown, no event.
+      if (scope === 'others') {
+        const access_token = data.session?.access_token
+        if (!access_token) {
+          return { error: new AuthSessionMissingError() }
+        }
+        const { error } = await this.api.revokeOtherSessions({ access_token })
+        return { error }
+      }
+
+      // Local scope is storage only, by contract: the SSO session at the auth
+      // server — and every refresh token it issued — stays valid.
+      if (scope === 'local') {
+        await this._removeSession()
+        await this.storage.removeItem(`${this.storageKey}-code-verifier`)
+        await this._notifyAllSubscribers('SIGNED_OUT', null)
+        return { error: null }
+      }
+
       // RP-initiated logout: a top-level navigation to /logout is the only way
       // to clear the auth server's SSO cookie from another origin (a cross-site
       // fetch can neither send nor clear it). Default for the global scope in a
@@ -2949,8 +2989,8 @@ export class FaableAuthClient extends Base {
         await new Promise<never>(() => {})
       }
 
-      // Non-redirect path (opted out, non-global scope, or non-browser):
-      // best-effort cross-origin call to revoke server-side tokens. Send
+      // Non-redirect path (opted out, or non-browser): best-effort
+      // cross-origin call to revoke server-side tokens. Send
       // credentials so it can clear the cookie when app + auth share a site.
       // Whatever it returns, the LOCAL teardown below must still run — a
       // CORS-blocked or unreachable /logout must never leave the user
@@ -2977,11 +3017,9 @@ export class FaableAuthClient extends Base {
           }
         }
       }
-      if (scope !== 'others') {
-        await this._removeSession()
-        await this.storage.removeItem(`${this.storageKey}-code-verifier`)
-        await this._notifyAllSubscribers('SIGNED_OUT', null)
-      }
+      await this._removeSession()
+      await this.storage.removeItem(`${this.storageKey}-code-verifier`)
+      await this._notifyAllSubscribers('SIGNED_OUT', null)
       return { error: revokeError }
     })
   }
@@ -3132,5 +3170,100 @@ export class FaableAuthClient extends Base {
 
       throw error
     }
+  }
+
+  /**
+   * A live access token without showing a login screen — or the reason there
+   * cannot be one.
+   *
+   * 1. **Refresh first.** The stored refresh token is exchanged at
+   *    `/oauth/token` (no navigation). This is the everyday path.
+   * 2. **Then `prompt=none`, as a top-level navigation.** When the refresh
+   *    is refused — no session, or `invalid_grant` because the session was
+   *    revoked: a sign-out on another device, an admin revoke, a
+   *    back-channel logout — the SDK sends the browser through
+   *    `/authorize?prompt=none`. The auth server signs the user back in from
+   *    its SSO cookie without a screen, and the page lands on `redirectTo`
+   *    with the user's location in `returnTo` (see
+   *    {@link FaableAuthClient.initialize}). On this path the promise **never
+   *    resolves**: the page is navigating away.
+   *
+   * There is no hidden iframe on purpose: third-party cookie blocking makes an
+   * iframe to the auth domain unreliable in every major browser, so the silent
+   * round-trip is a real navigation the user does not see.
+   *
+   * When the SSO session is gone too, the server comes back with
+   * `?error=login_required`. {@link initialize} keeps that for one
+   * {@link getRedirectError} read, and a further `getTokenSilently()` on the
+   * same page load resolves with an `AuthLoginRequiredError` instead of
+   * navigating again — no loops. A network failure or a 5xx during the
+   * refresh is not a refusal: it comes back as the retryable error, and the
+   * session is kept.
+   *
+   * @example
+   * ```ts
+   * const { data, error } = await auth.getTokenSilently()
+   * if (error) {
+   *   if (error.code === 'login_required') auth.authorize({ response_type: 'code' })
+   *   return
+   * }
+   * fetch('/api/me', { headers: { Authorization: `Bearer ${data.access_token}` } })
+   * ```
+   * @category Sessions
+   */
+  async getTokenSilently(
+    options: GetTokenSilently = {}
+  ): Promise<
+    | { data: { access_token: string; session: Session }; error: null }
+    | { data: null; error: AuthError }
+  > {
+    await this.initializePromise
+
+    const { data, error } = await this.refreshSession()
+    if (!error && data.session) {
+      return {
+        data: {
+          access_token: data.session.access_token,
+          session: data.session
+        },
+        error: null
+      }
+    }
+    // No verdict from the server (network, 5xx, timeout): the session is not
+    // refused, so navigating away would throw a good session at a blip.
+    if (error && isAuthRetryableFetchError(error)) {
+      return { data: null, error }
+    }
+
+    // This page load already IS the return leg of a silent attempt the
+    // server refused. Navigating again would loop forever.
+    const last = this._lastInitializeResult?.error as
+      | (AuthError & { details?: { error: string } | null })
+      | null
+      | undefined
+    const lastCode = last?.details?.error
+    if (
+      last?.name === 'AuthImplicitGrantRedirectError' &&
+      lastCode &&
+      SILENT_AUTH_ERRORS.indexOf(lastCode) !== -1
+    ) {
+      return { data: null, error: new AuthLoginRequiredError(lastCode) }
+    }
+
+    if (options.redirect === false || !isBrowser()) {
+      return { data: null, error: new AuthLoginRequiredError() }
+    }
+
+    // Never resolves in a browser: the navigation owns the page from here.
+    await this._handleConnectionSignIn({
+      redirectTo: options.redirectTo,
+      returnTo: options.returnTo ?? window?.location.href,
+      scopes: options.scope,
+      audience: options.audience,
+      appState: options.appState,
+      queryParams: { ...(options.queryParams ?? {}), prompt: 'none' },
+      silent: true
+    })
+    return { data: null, error: new AuthLoginRequiredError() }
   }
 }

@@ -7,7 +7,9 @@ import type { SignOutReason } from './FaableAuthClient'
 import { createClient } from './createClient'
 import {
   AuthError,
+  AuthLoginRequiredError,
   AuthMfaRequiredError,
+  isAuthLoginRequiredError,
   isAuthMfaRequiredError
 } from './lib/errors'
 import type {
@@ -22,6 +24,7 @@ import type {
   AuthResult,
   CookieOptions,
   FaableAuthClientConfig,
+  GetTokenSilently,
   JwtClaims,
   LastUsedCookieOptions,
   OAuthResponse,
@@ -38,7 +41,9 @@ export {
   User,
   FaableAuthClient,
   AuthError,
+  AuthLoginRequiredError,
   AuthMfaRequiredError,
+  isAuthLoginRequiredError,
   isAuthMfaRequiredError,
   createClient,
   cookieStorageAdapter,
@@ -54,6 +59,7 @@ export type {
   AuthChangeEvent,
   Subscription,
   SignOut,
+  GetTokenSilently,
   SupportedStorage,
   CookieOptions,
   LastUsedCookieOptions,
