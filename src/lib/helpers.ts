@@ -169,6 +169,7 @@ export type RawAuthResponse = {
   access_token: string
   refresh_token: string
   token_type: string
+  id_token?: string
 }
 /**
  * hasSession checks if the response object contains a valid session

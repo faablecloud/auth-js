@@ -1934,6 +1934,10 @@ export class FaableAuthClient extends Base {
    * @param options.returnTo Where to send the browser after logout, mapped to
    *   the OIDC `post_logout_redirect_uri`. Must be registered as a logout URL
    *   on the client or the server responds `400`.
+   * @param options.idTokenHint The `id_token` of the session being ended
+   *   (`id_token_hint`). {@link FaableAuthClient.signOut} passes the stored
+   *   one; when driving the navigation yourself, take it from
+   *   {@link FaableAuthClient.getSession}.
    * @example
    * ```ts
    * window.location.assign(auth.getLogoutUrl({ returnTo: 'https://app.example.com' }))
@@ -1941,10 +1945,19 @@ export class FaableAuthClient extends Base {
    * @see {@link https://faable.com/docs/auth/oidc/logout | Logout}
    * @category Authorize URLs
    */
-  getLogoutUrl(options: { returnTo?: string } = {}): string {
+  getLogoutUrl(
+    options: { returnTo?: string; idTokenHint?: string } = {}
+  ): string {
     const params: Record<string, string> = { client_id: this.clientId }
     if (options.returnTo) {
       params.post_logout_redirect_uri = options.returnTo
+    }
+    // OIDC RP-Initiated Logout §2 `id_token_hint`: the id_token of the session
+    // being ended. The server verifies it against its own keys, and a verified
+    // hint is what lets it end the session without asking the person to
+    // confirm. `signOut()` passes the stored session's id_token by itself.
+    if (options.idTokenHint) {
+      params.id_token_hint = options.idTokenHint
     }
     return `${this.domainUrl}/logout?${new URLSearchParams(params).toString()}`
   }
@@ -2592,6 +2605,8 @@ export class FaableAuthClient extends Base {
         session = {
           access_token: currentSession.access_token,
           refresh_token: currentSession.refresh_token,
+          // Typed as the token pair only; the stored object is a full session.
+          id_token: (currentSession as Partial<Session>).id_token,
           user,
           token_type: 'bearer',
           expires_in: expiresAt - timeNow,
@@ -2926,7 +2941,9 @@ export class FaableAuthClient extends Base {
         await this._removeSession()
         await this.storage.removeItem(`${this.storageKey}-code-verifier`)
         await this._notifyAllSubscribers('SIGNED_OUT', null)
-        windowHelpers.redirect(this.getLogoutUrl({ returnTo }))
+        windowHelpers.redirect(
+          this.getLogoutUrl({ returnTo, idTokenHint: data.session?.id_token })
+        )
         // The browser is navigating away — never resolve, so a loading state
         // tied to the await doesn't flip back before the page unloads.
         await new Promise<never>(() => {})

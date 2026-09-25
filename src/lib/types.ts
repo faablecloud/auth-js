@@ -571,6 +571,11 @@ export interface Session {
    */
   expires_at?: number
   token_type: string
+  /**
+   * The OpenID Connect id_token of this session, when the grant returned
+   * one. What {@link FaableAuthClient.signOut} sends as `id_token_hint`.
+   */
+  id_token?: string
   user: User
 }
 
