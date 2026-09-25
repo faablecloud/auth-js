@@ -19,9 +19,19 @@ export default class FaableAuthApi extends BaseLog {
   }: {
     client_id: string
     returnTo?: string
+    // OIDC RP-Initiated Logout §2 `id_token_hint`: the id_token of the
+    // session being ended. A verified hint is what lets the tenant end the
+    // session without asking the user to confirm
+    // (`Account.logout_confirm_required`) — the redirect path already sends
+    // it via `getLogoutUrl`; this is the same hint on the fetch-only path
+    // (`signOut({ redirect: false })`, and every non-global scope).
+    id_token_hint?: string
     credentials?: RequestCredentials
   }): Promise<{ data: null; error: AuthError | null }> {
-    const url = `${this.base_url}/logout?${new URLSearchParams(params)}`
+    const definedParams = Object.fromEntries(
+      Object.entries(params).filter(([, value]) => !!value)
+    ) as Record<string, string>
+    const url = `${this.base_url}/logout?${new URLSearchParams(definedParams)}`
     this._debug(`requesting ${url}`)
     // Send cookies so the /logout can clear the SSO cookie when the app and the
     // auth server share a site. Cross-site it is still blocked — a top-level

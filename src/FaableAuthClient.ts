@@ -3000,6 +3000,7 @@ export class FaableAuthClient extends Base {
       if (accessToken) {
         const { error } = await this.api.signOut({
           client_id: this.clientId,
+          id_token_hint: data.session?.id_token,
           credentials: 'include'
         })
         if (error) {

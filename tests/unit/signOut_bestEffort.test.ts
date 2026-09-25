@@ -23,7 +23,7 @@ const inMemoryStorage = (): SupportedStorage => {
 
 const SESSION_KEY = 'faableauth-test-client'
 
-const seededClient = () => {
+const seededClient = (extra: Record<string, unknown> = {}) => {
   const storage = inMemoryStorage()
   storage.setItem(
     SESSION_KEY,
@@ -32,7 +32,8 @@ const seededClient = () => {
       refresh_token: 'rt_test',
       token_type: 'bearer',
       expires_at: Math.floor(Date.now() / 1000) + 3600,
-      user: { id: 'user_test' }
+      user: { id: 'user_test' },
+      ...extra
     })
   )
   const auth = createClient({
@@ -90,5 +91,28 @@ describe('signOut({ redirect: false }) local teardown', () => {
 
     expect(error).toBeNull()
     expect(await storage.getItem(SESSION_KEY)).toBeNull()
+  })
+
+  // Backlog §241 step 17: the tenant can only skip the /logout confirmation
+  // screen (`Account.logout_confirm_required`) when it gets a VERIFIED
+  // id_token_hint. The redirect path already sends it (getLogoutUrl); this
+  // is the same hint on the fetch-only path this suite covers.
+  it('sends the session id_token as id_token_hint on the /logout GET', async () => {
+    const { auth } = seededClient({ id_token: 'the.id.token' })
+
+    await auth.signOut({ redirect: false })
+
+    expect(mGet).toHaveBeenCalledTimes(1)
+    const [url] = mGet.mock.calls[0]
+    expect(new URL(url).searchParams.get('id_token_hint')).toBe('the.id.token')
+  })
+
+  it('omits id_token_hint when the session has no id_token (e.g. a password grant)', async () => {
+    const { auth } = seededClient()
+
+    await auth.signOut({ redirect: false })
+
+    const [url] = mGet.mock.calls[0]
+    expect(new URL(url).searchParams.has('id_token_hint')).toBe(false)
   })
 })
