@@ -261,7 +261,9 @@ export class FaableAuthClient extends Base {
    * @category Getting started
    */
   constructor(config: FaableAuthClientConfig) {
-    const debug = config?.debug || false
+    // `undefined` (not `false`) when unset, so BaseLog can fall back to the
+    // `faable.auth.debug` localStorage flag.
+    const debug = config?.debug
     super({ debug })
 
     this.sessionCheckExpiryDays = 1
