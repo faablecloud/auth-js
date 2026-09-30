@@ -83,7 +83,8 @@ describe('callback reports', () => {
       {
         client_id: 'test-client',
         event: 'callback_no_verifier',
-        stage: 'verifier_loading'
+        stage: 'verifier_loading',
+        code_prefix: 'abc'
       }
     ])
     const [url, init] = h.fetch.mock.calls[0] as [string, RequestInit]
@@ -110,7 +111,67 @@ describe('callback reports', () => {
         client_id: 'test-client',
         event: 'callback_stalled',
         stage: 'token_request_sent',
-        elapsed_ms: 15_000
+        elapsed_ms: 15_000,
+        code_prefix: 'abc'
+      }
+    ])
+  })
+
+  it('a stalled exchange that finishes late reports how long it took', async () => {
+    h.loc.href = 'https://app.example.com/cb?code=424b448b-b171-40b2'
+    let release: (v: unknown) => void = () => {}
+    h.fetch = vi.fn((url: string) =>
+      url.endsWith('/oauth/token')
+        ? new Promise(resolve => {
+            release = resolve
+          })
+        : Promise.resolve({ ok: true, status: 204, json: async () => ({}) })
+    )
+    const auth = new FaableAuthClient(config(withVerifier()))
+    const done = auth.initialize()
+
+    await vi.advanceTimersByTimeAsync(40_000)
+    release({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        access_token: 'a',
+        refresh_token: 'r',
+        expires_in: 3600,
+        token_type: 'bearer',
+        user: { sub: 'user_1' }
+      })
+    })
+    const { error } = await done
+
+    expect(error).toBeNull()
+    expect(reports()).toEqual([
+      {
+        client_id: 'test-client',
+        event: 'callback_stalled',
+        stage: 'token_request_sent',
+        elapsed_ms: 15_000,
+        code_prefix: '424b448b'
+      },
+      {
+        client_id: 'test-client',
+        event: 'callback_recovered',
+        stage: 'done',
+        elapsed_ms: 40_000,
+        code_prefix: '424b448b'
+      }
+    ])
+  })
+
+  it('a code that does not look like ours travels without prefix', async () => {
+    h.loc.href = 'https://app.example.com/cb?code=Zz%3Cscript%3E'
+    const auth = new FaableAuthClient(config())
+    await auth.initialize()
+    expect(reports()).toEqual([
+      {
+        client_id: 'test-client',
+        event: 'callback_no_verifier',
+        stage: 'verifier_loading'
       }
     ])
   })
