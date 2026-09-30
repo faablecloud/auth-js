@@ -18,7 +18,7 @@ import {
   isAuthRetryableFetchError
 } from './lib/errors'
 import { _get, _post } from './lib/fetch'
-import { document, window } from './lib/globals'
+import { document, fetch, window } from './lib/globals'
 import {
   Deferred,
   RawAuthResponse,
@@ -71,6 +71,7 @@ import {
   clearURLParameters,
   parseParametersFromURL
 } from './lib/url_helpers'
+import { commit, version } from './lib/version'
 import { withTimeout } from './lib/with_timeout'
 import { Lock } from './lock/Lock'
 import { LockAcquireTimeoutError } from './lock/locks'
@@ -115,6 +116,19 @@ const REFRESH_TIMEOUT_MS = AUTO_REFRESH_TICK_DURATION + 10 * 1000
  * `storageKey` prefix so multiple clients on one origin don't cross-read.
  */
 const SIGNOUT_REASON_SUFFIX = '-signout-reason'
+
+/**
+ * How long a `?code=` callback may take before the client tells the server it
+ * is stuck (`POST /sdk/report`, event `callback_stalled`).
+ *
+ * The exchange is one round-trip; on a phone on mobile data it takes under two
+ * seconds. The report exists because on 2026-09-30 an iPhone came back to the
+ * Fundación Rodríguez Pascual six times with a code and not one of those page
+ * loads sent `POST /oauth/token`: from the server that was pure silence,
+ * indistinguishable from someone closing the tab. It only reports — it does
+ * not cancel or fail the exchange, which may still finish.
+ */
+const CALLBACK_STALL_REPORT_MS = 15 * 1000
 
 /** Consume-once record of why the SDK terminated the session on its own. */
 export type SignOutReason = {
@@ -162,6 +176,12 @@ export class FaableAuthClient extends Base {
   protected initializePromise: Promise<InitializeResult> | null = null
   protected _lastInitializeResult: InitializeResult | null = null
   protected detectSessionInUrl = true
+  /**
+   * Last step a `?code=` callback reached, sent along with a
+   * {@link FaableAuthClient._reportSdk} report so the server log says WHERE it
+   * stopped. `null` when this page load is not a callback.
+   */
+  protected _callbackStage: string | null = null
 
   /**
    * Error the auth server returned via redirect (`?error=...&
@@ -326,15 +346,93 @@ export class FaableAuthClient extends Base {
       return await this.initializePromise
     }
 
+    const stallTimer = this._watchCallback()
+
     this.initializePromise = (async () => {
-      return await this.lock._acquireLock(-1, async () => {
-        return await this._initialize()
-      })
+      try {
+        return await this.lock._acquireLock(-1, async () => {
+          this._setCallbackStage('lock_acquired')
+          return await this._initialize()
+        })
+      } finally {
+        if (stallTimer) clearTimeout(stallTimer)
+      }
     })()
 
     const result = await this.initializePromise
     this._lastInitializeResult = result
     return result
+  }
+
+  /**
+   * On a `?code=` callback, arms the stall report and marks the first stage.
+   * Returns the timer so {@link FaableAuthClient.initialize} can disarm it, or
+   * `null` when this page load is not a callback.
+   *
+   * Armed in `initialize()` and not in `_initialize()` on purpose: a callback
+   * stuck waiting for the lock never reaches `_initialize()`, and that is one
+   * of the places it can hang.
+   */
+  private _watchCallback(): ReturnType<typeof setTimeout> | null {
+    if (!isBrowser() || !this.detectSessionInUrl) return null
+    let code: string | undefined
+    try {
+      code = parseParametersFromURL(window?.location.href).code
+    } catch {
+      return null
+    }
+    if (!code) return null
+
+    const startedAt = Date.now()
+    this._setCallbackStage('lock_wait')
+    return setTimeout(() => {
+      this._reportSdk('callback_stalled', {
+        elapsed_ms: Date.now() - startedAt
+      })
+    }, CALLBACK_STALL_REPORT_MS)
+  }
+
+  private _setCallbackStage(stage: string) {
+    // Only a callback page load tracks stages; the exchange helpers also run
+    // for `exchangeCodeForSession()` called by hand, which is not watched.
+    if (this._callbackStage === null && stage !== 'lock_wait') return
+    this._callbackStage = stage
+    this._debug('#_callbackStage', stage)
+  }
+
+  /**
+   * Tells the auth server that a sign-in could not be completed in this
+   * browser (`POST /sdk/report`). Fire-and-forget: it never throws, never
+   * blocks the caller and its outcome is ignored — the one thing it must not
+   * do is become a second way for the callback to fail.
+   *
+   * `keepalive` so it still leaves if the person gives up and navigates away,
+   * which is exactly what someone looking at a stuck spinner does.
+   */
+  private _reportSdk(
+    event: 'callback_stalled' | 'callback_no_verifier',
+    extra: { elapsed_ms?: number; detail?: string } = {}
+  ) {
+    try {
+      const body: Record<string, unknown> = {
+        client_id: this.clientId,
+        event,
+        ...extra
+      }
+      if (this._callbackStage) body.stage = this._callbackStage
+      this._debug('#_reportSdk', event, body)
+      void fetch(`${this.domainUrl}/sdk/report`, {
+        method: 'POST',
+        keepalive: true,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-faable-client': `auth-js/${version}+${commit}`
+        },
+        body: JSON.stringify(body)
+      }).catch(() => {})
+    } catch {
+      // A report is never worth an exception.
+    }
   }
 
   /**
@@ -716,11 +814,13 @@ export class FaableAuthClient extends Base {
         error: AuthError
       }
   > {
+    this._setCallbackStage('verifier_loading')
     const stored = await loadCodeVerifier(
       this.storage,
       `${this.storageKey}-code-verifier`
     )
     if (!stored) {
+      this._reportSdk('callback_no_verifier')
       return {
         data: {
           user: null,
@@ -748,6 +848,7 @@ export class FaableAuthClient extends Base {
     // un listener tiene que poder leerlo mientras reacciona.
     this._appState = appState
 
+    this._setCallbackStage('token_request_sent')
     const rawResponse = await _post<Partial<RawAuthResponse>>(
       `${this.domainUrl}/oauth/token`,
       {
@@ -758,6 +859,7 @@ export class FaableAuthClient extends Base {
         ...(this.audience ? { audience: this.audience } : {})
       }
     )
+    this._setCallbackStage('token_response')
 
     const { data, error } = _sessionResponse(rawResponse)
 
