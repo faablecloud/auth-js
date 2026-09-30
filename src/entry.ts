@@ -31,6 +31,9 @@ import type {
   Provider,
   SignInWithOAuthConnection,
   SignOut,
+  SignupLoginOptions,
+  SignupParams,
+  SignupResult,
   Subscription,
   SupportedStorage
 } from './lib/types'
@@ -69,5 +72,8 @@ export type {
   AuthFlowType,
   Provider,
   SignOutReason,
-  JwtClaims
+  JwtClaims,
+  SignupParams,
+  SignupLoginOptions,
+  SignupResult
 }

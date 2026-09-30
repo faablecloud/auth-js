@@ -225,11 +225,11 @@ misconfiguration (missing `domain` / `clientId`) — a programming error you fix
 once, not a runtime condition to catch.
 
 This applies to `signInWithOauthConnection`, `signInWithUsernamePassword`,
-`signUp`, `signInWithOtp`, `signInWithPasswordless`, `changePassword`,
-`changeEmail`, `signOut`, `getSession`, `getClaims`, `setSession`,
-`refreshSession`, `initialize` and `handleRedirectCallback`. Their return types
-(`AuthResult<T>`, `AuthResponse`, `OAuthResponse`) are all variants of the same
-shape.
+`signup`, `signupAndLogin`, `signUp`, `signInWithOtp`, `signInWithPasswordless`,
+`changePassword`, `changeEmail`, `signOut`, `getSession`, `getClaims`,
+`setSession`, `refreshSession`, `initialize` and `handleRedirectCallback`. Their
+return types (`AuthResult<T>`, `AuthResponse`, `OAuthResponse`) are all variants
+of the same shape.
 
 ### Prefer throw-style? Use `unwrap`
 

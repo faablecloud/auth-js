@@ -596,6 +596,44 @@ export interface Session {
  * `AuthResponse` and `OAuthResponse` are the two richer, discriminated variants
  * of this same contract.
  */
+/**
+ * The new user for {@link FaableAuthClient.signup}. Which identifier is
+ * required follows the database connection's login identifier: an `email`
+ * connection needs `email`, a `username` one needs `username`, and
+ * `email_or_username` accepts either (or both).
+ */
+export type SignupParams = {
+  /** Email identifier. Required unless the connection signs in by username, and whenever `password` is omitted. */
+  email?: string
+  /** Username identifier, stored as typed (case-sensitive). No `@` or whitespace. */
+  username?: string
+  /**
+   * Checked against the connection's password policy. Omit it to create the
+   * user without one: they set it through the password reset email, and until
+   * then nothing signs in with a password.
+   */
+  password?: string
+  name?: string
+  given_name?: string
+  family_name?: string
+  user_metadata?: Record<string, unknown>
+  /** Database connection name, when the tenant has more than one. */
+  connection?: string
+}
+
+/** Where the login that follows a signup lands. */
+export type SignupLoginOptions = {
+  redirectTo?: string
+  state?: string
+  audience?: string
+}
+
+/** The user {@link FaableAuthClient.signup} created. Not a session. */
+export type SignupResult = {
+  user_id: string
+  email_verified: boolean
+}
+
 export type AuthResult<Data = unknown> = {
   data: Data | null
   error: AuthError | null

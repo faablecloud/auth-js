@@ -56,6 +56,9 @@ import {
   LastUsedCookieOptions,
   OAuthResponse,
   SignInWithOAuthConnection,
+  SignupLoginOptions,
+  SignupParams,
+  SignupResult,
   Subscription,
   SupportedStorage,
   User
@@ -1579,28 +1582,154 @@ export class FaableAuthClient extends Base {
   }
 
   /**
-   * Registers a new user against the tenant's database connection with an
-   * email + password, then signs them in — so an email/password signup form
-   * can live entirely in the browser with no backend of your own.
+   * Creates a user in the tenant's database connection, and nothing else: no
+   * login, no navigation. The browser-side counterpart of Auth0's
+   * `webAuth.signup()` — a contact or waitlist form can register people
+   * without a backend of its own.
    *
-   * This calls the public `POST /dbconnections/signup` endpoint (the Faable
-   * analogue of Auth0's `/dbconnections/signup`) which creates the user and
-   * its credential in one step, then chains
-   * {@link FaableAuthClient.signInWithUsernamePassword} to establish the
-   * session.
-   *
-   * **Auto-login navigates the browser.** Like every interactive
-   * username/password login in this SDK, the sign-in step submits a form that
-   * round-trips through the auth server, so on success the page redirects to
-   * your `redirectTo` and the live session is delivered there by
-   * {@link FaableAuthClient.initialize} (and a `SIGNED_IN` event). This method
-   * only returns synchronously when signup itself fails, or in non-navigating
-   * runtimes (e.g. tests).
+   * Calls the public `POST /dbconnections/signup`. Which identifier is required
+   * follows the connection's login identifier (email, username or either), and
+   * the password is optional: a user created without one sets it through the
+   * password reset email. Unlike Auth0, which rejects a signup without password,
+   * Faable neither generates one nor stores an empty one — the credential just
+   * has no password yet.
    *
    * The user is created with `email_verified: false`; any verification /
    * welcome email is driven by the tenant's account settings.
    *
-   * @param data The new user's email, password and optional profile fields.
+   * @param data The new user's identifier(s), optional password and profile fields.
+   * @example
+   * ```ts
+   * const { data, error } = await auth.signup({
+   *   email: 'user@example.com',
+   *   name: 'Ada Lovelace',
+   *   user_metadata: { source: 'contact-form' }
+   * })
+   * if (error?.code === 'email_exists') showAlreadyRegistered()
+   * else if (error) showError(error.message)
+   * else console.log('created', data.user_id)
+   * ```
+   * @see {@link https://faable.com/docs/auth/connections | Connections}
+   * @category Sign in
+   */
+  async signup(data: SignupParams): Promise<AuthResult<SignupResult>> {
+    if (!data?.email && !data?.username) {
+      return {
+        data: null,
+        error: new AuthUnknownError('email or username is required', null)
+      }
+    }
+
+    const {
+      data: body,
+      error,
+      status,
+      code
+    } = await _post<SignupResult>(`${this.domainUrl}/dbconnections/signup`, {
+      client_id: this.clientId,
+      ...(data.email ? { email: data.email } : {}),
+      ...(data.username ? { username: data.username } : {}),
+      ...(data.password !== undefined ? { password: data.password } : {}),
+      ...(data.name ? { name: data.name } : {}),
+      ...(data.given_name ? { given_name: data.given_name } : {}),
+      ...(data.family_name ? { family_name: data.family_name } : {}),
+      ...(data.user_metadata ? { user_metadata: data.user_metadata } : {}),
+      ...(data.connection ? { connection: data.connection } : {})
+    })
+
+    if (error) {
+      // `_post` hands back the server's `{ status, message }` body as `data`
+      // and its `message` as `error`. Map the HTTP status to a stable
+      // ErrorCode so callers can branch without string-matching the message.
+      const httpStatus = status ?? ((body as any)?.status as number | undefined)
+      const errorCode =
+        httpStatus === 403
+          ? 'signup_disabled'
+          : httpStatus === 409
+            ? code === 'username_taken'
+              ? 'username_exists'
+              : 'email_exists'
+            : code === 'password_too_weak'
+              ? 'weak_password'
+              : httpStatus === 400
+                ? 'validation_failed'
+                : undefined
+      return {
+        data: null,
+        error: new AuthApiError(String(error), httpStatus ?? 500, errorCode)
+      }
+    }
+
+    return {
+      data: {
+        user_id: (body as SignupResult).user_id,
+        email_verified: (body as SignupResult).email_verified
+      },
+      error: null
+    }
+  }
+
+  /**
+   * Creates a user with {@link FaableAuthClient.signup} and then signs them
+   * in — the counterpart of Auth0's `signupAndLogin`.
+   *
+   * **The login navigates the browser.** Like every interactive
+   * username/password login in this SDK, it submits a form that round-trips
+   * through the auth server, so on success the page redirects to your
+   * `redirectTo` and the live session is delivered there by
+   * {@link FaableAuthClient.initialize} (and a `SIGNED_IN` event). This method
+   * only returns when the signup or the login fails, or in non-navigating
+   * runtimes (e.g. tests). The password is required here: without one there is
+   * nothing to sign in with.
+   *
+   * @param data The new user, with its password, plus where the login lands.
+   * @example
+   * ```ts
+   * const { error } = await auth.signupAndLogin({
+   *   email: 'user@example.com',
+   *   password: '••••••••',
+   *   redirectTo: 'https://app.example.com/callback'
+   * })
+   * if (error) showError(error.message) // e.g. email_exists, weak_password
+   * // otherwise the browser is already navigating to complete the login
+   * ```
+   * @category Sign in
+   */
+  async signupAndLogin(
+    data: SignupParams & { password: string } & SignupLoginOptions
+  ): Promise<AuthResult<null>> {
+    if (!data?.password) {
+      return {
+        data: null,
+        error: new AuthUnknownError(
+          'password is required to sign in after signup',
+          null
+        )
+      }
+    }
+    const { error } = await this.signup(data)
+    if (error) return { data: null, error }
+
+    // Auto-login through the standard redirect flow (no ROPC grant exists for
+    // database connections, so this is the same path a manual login takes).
+    return this.signInWithUsernamePassword({
+      username: (data.email || data.username) as string,
+      password: data.password,
+      redirectTo: data.redirectTo,
+      state: data.state,
+      audience: data.audience
+    })
+  }
+
+  /**
+   * Registers a new user and, by default, signs them in.
+   *
+   * Kept for compatibility: with `signIn` unset or `true` it is
+   * {@link FaableAuthClient.signupAndLogin} (the browser navigates on
+   * success); with `signIn: false` it is {@link FaableAuthClient.signup} and
+   * returns the created user. New code should call one of those two directly.
+   *
+   * @param data The new user, plus `signIn` and where the login lands.
    * @example
    * ```ts
    * const { error } = await auth.signUp({
@@ -1609,71 +1738,33 @@ export class FaableAuthClient extends Base {
    *   name: 'Ada Lovelace',
    *   redirectTo: 'https://app.example.com/callback'
    * })
-   * if (error) showError(error.message) // e.g. 'email_taken', 'signup_disabled'
+   * if (error) showError(error.message) // e.g. 'email_exists', 'signup_disabled'
    * // otherwise the browser is already navigating to complete the login
    * ```
    * @see {@link https://faable.com/docs/auth/connections | Connections}
    * @category Sign in
    */
-  async signUp(data: {
-    email: string
-    password: string
-    name?: string
-    given_name?: string
-    family_name?: string
-    user_metadata?: Record<string, unknown>
-    connection?: string
-    redirectTo?: string
-    state?: string
-    audience?: string
-  }): Promise<AuthResult<null>> {
-    if (!data?.email || !data?.password) {
+  async signUp(
+    data: SignupParams & SignupLoginOptions & { signIn: false }
+  ): Promise<AuthResult<SignupResult>>
+  async signUp(
+    data: SignupParams & SignupLoginOptions & { signIn?: true }
+  ): Promise<AuthResult<null>>
+  async signUp(
+    data: SignupParams & SignupLoginOptions & { signIn?: boolean }
+  ): Promise<AuthResult<SignupResult> | AuthResult<null>> {
+    const { signIn = true, ...rest } = data ?? ({} as typeof data)
+    if (!signIn) return this.signup(rest)
+    if (!rest.password || (!rest.email && !rest.username)) {
       return {
         data: null,
-        error: new AuthUnknownError('email and password are required', null)
+        error: new AuthUnknownError(
+          'email (or username) and password are required',
+          null
+        )
       }
     }
-
-    const { data: body, error } = await _post(
-      `${this.domainUrl}/dbconnections/signup`,
-      {
-        client_id: this.clientId,
-        email: data.email,
-        password: data.password,
-        ...(data.name ? { name: data.name } : {}),
-        ...(data.given_name ? { given_name: data.given_name } : {}),
-        ...(data.family_name ? { family_name: data.family_name } : {}),
-        ...(data.user_metadata ? { user_metadata: data.user_metadata } : {}),
-        ...(data.connection ? { connection: data.connection } : {})
-      }
-    )
-
-    if (error) {
-      // `_post` hands back the server's `{ status, message }` body as `data`
-      // and its `message` as `error`. Map the HTTP status to a stable
-      // ErrorCode so callers can branch without string-matching the message.
-      const status = (body as any)?.status as number | undefined
-      const code =
-        status === 403
-          ? 'signup_disabled'
-          : status === 409
-            ? 'email_exists'
-            : undefined
-      return {
-        data: null,
-        error: new AuthApiError(String(error), status ?? 500, code)
-      }
-    }
-
-    // Auto-login through the standard redirect flow (no ROPC grant exists for
-    // database connections, so this is the same path a manual login takes).
-    return this.signInWithUsernamePassword({
-      username: data.email,
-      password: data.password,
-      redirectTo: data.redirectTo,
-      state: data.state,
-      audience: data.audience
-    })
+    return this.signupAndLogin({ ...rest, password: rest.password })
   }
 
   /**

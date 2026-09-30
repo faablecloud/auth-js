@@ -8,6 +8,7 @@ export type ErrorCode =
   | 'validation_failed'
   | 'bad_json'
   | 'email_exists'
+  | 'username_exists'
   | 'phone_exists'
   | 'bad_jwt'
   | 'not_admin'

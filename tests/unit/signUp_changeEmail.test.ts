@@ -128,6 +128,156 @@ describe('signUp', () => {
   })
 })
 
+const signupReturns = (response: {
+  data: unknown
+  error: unknown
+  status?: number
+  code?: string
+}) =>
+  mPost.mockImplementation(async (url: string) =>
+    url.endsWith('/dbconnections/signup')
+      ? response
+      : { data: null, error: null }
+  )
+
+const signupBody = () =>
+  mPost.mock.calls.find(c =>
+    String(c[0]).endsWith('/dbconnections/signup')
+  )?.[1]
+
+const created = {
+  data: { status: 'created', user_id: 'user_1', email_verified: false },
+  error: null,
+  status: 200
+}
+
+describe('signup', () => {
+  it('creates the user and returns it without logging in', async () => {
+    const auth = createClient(baseConfig())
+    signupReturns(created)
+    const loginSpy = vi.spyOn(auth, 'signInWithUsernamePassword')
+
+    const { data, error } = await auth.signup({
+      email: 'user@example.com',
+      password: 'BrandN3wPass'
+    })
+
+    expect(error).toBeNull()
+    expect(data).toEqual({ user_id: 'user_1', email_verified: false })
+    expect(loginSpy).not.toHaveBeenCalled()
+  })
+
+  it('omits the password when none is given, and sends a username', async () => {
+    const auth = createClient(baseConfig())
+    signupReturns(created)
+
+    await auth.signup({ email: 'user@example.com', username: 'ada' })
+
+    expect(signupBody()).toEqual({
+      client_id: 'test-client',
+      email: 'user@example.com',
+      username: 'ada'
+    })
+    expect(signupBody()).not.toHaveProperty('password')
+  })
+
+  it('needs an email or a username, and never touches the network without one', async () => {
+    const auth = createClient(baseConfig())
+    const { error } = await auth.signup({ password: 'BrandN3wPass' })
+    expect(error?.message).toContain('email or username')
+    expect(signupBody()).toBeUndefined()
+  })
+
+  it('tells a taken username from a taken email', async () => {
+    const auth = createClient(baseConfig())
+    signupReturns({
+      data: { status: 409, message: 'username_taken' },
+      error: 'username_taken',
+      status: 409,
+      code: 'username_taken'
+    })
+    const { error } = await auth.signup({ username: 'ada', password: 'x' })
+    expect(error?.code).toBe('username_exists')
+    expect(error?.status).toBe(409)
+  })
+
+  it('maps password_too_weak to weak_password', async () => {
+    const auth = createClient(baseConfig())
+    signupReturns({
+      data: { status: 400, message: 'too short' },
+      error: 'too short',
+      status: 400,
+      code: 'password_too_weak'
+    })
+    const { error } = await auth.signup({ email: 'a@b.com', password: 'x' })
+    expect(error?.code).toBe('weak_password')
+  })
+})
+
+describe('signupAndLogin', () => {
+  it('requires a password and does not create the user without one', async () => {
+    const auth = createClient(baseConfig())
+    const { error } = await auth.signupAndLogin({
+      email: 'user@example.com'
+    } as any)
+    expect(error?.message).toContain('password')
+    expect(signupBody()).toBeUndefined()
+  })
+
+  it('logs in with the username when the user has no email', async () => {
+    const auth = createClient(baseConfig())
+    signupReturns(created)
+    const loginSpy = vi
+      .spyOn(auth, 'signInWithUsernamePassword')
+      .mockResolvedValue({ data: null, error: null })
+
+    const { error } = await auth.signupAndLogin({
+      username: 'ada',
+      password: 'BrandN3wPass'
+    })
+
+    expect(error).toBeNull()
+    expect(loginSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ username: 'ada', password: 'BrandN3wPass' })
+    )
+  })
+
+  it('does not log in when the signup fails', async () => {
+    const auth = createClient(baseConfig())
+    signupReturns({
+      data: { status: 409, message: 'email_taken' },
+      error: 'email_taken',
+      status: 409,
+      code: 'email_taken'
+    })
+    const loginSpy = vi.spyOn(auth, 'signInWithUsernamePassword')
+    const { error } = await auth.signupAndLogin({
+      email: 'taken@example.com',
+      password: 'BrandN3wPass'
+    })
+    expect(error?.code).toBe('email_exists')
+    expect(loginSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('signUp({ signIn: false })', () => {
+  it('only creates the user, like signup()', async () => {
+    const auth = createClient(baseConfig())
+    signupReturns(created)
+    const loginSpy = vi.spyOn(auth, 'signInWithUsernamePassword')
+
+    const { data, error } = await auth.signUp({
+      email: 'user@example.com',
+      signIn: false
+    })
+
+    expect(error).toBeNull()
+    expect(data?.user_id).toBe('user_1')
+    expect(loginSpy).not.toHaveBeenCalled()
+    expect(signupBody()).not.toHaveProperty('signIn')
+  })
+})
+
 describe('changeEmail', () => {
   it('requires a new_email', async () => {
     const auth = createClient(baseConfig())
