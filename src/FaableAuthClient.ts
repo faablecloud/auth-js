@@ -133,6 +133,15 @@ const SIGNOUT_REASON_SUFFIX = '-signout-reason'
  */
 const CALLBACK_STALL_REPORT_MS = 15 * 1000
 
+/**
+ * The exchange's answer to a `?code=` with no stored verifier. `_initialize`
+ * matches on it (by message, like the identity-linked workaround: subclassed
+ * errors lose their prototype in the ES5 bundle) to keep the session instead
+ * of treating the code as a failed login.
+ */
+const NO_VERIFIER_MESSAGE =
+  'No active PKCE code verifier — the authorization flow has expired or was not started'
+
 /** A callback page load being watched: see `_watchCallback`. */
 type CallbackWatch = {
   startedAt: number
@@ -621,6 +630,23 @@ export class FaableAuthClient extends Base {
             return { error }
           }
 
+          // A code this client holds no verifier for was never a login of
+          // ours: nothing was exchanged, so there is no failed attempt to
+          // clean up after. It is a URL replayed after its verifier was spent
+          // — the browser re-requesting a used `/authorize` and auth answering
+          // by silent SSO with a fresh code. Removing the session here turned
+          // that into a forced re-login, seven times in 14 minutes for one
+          // signed-in user (2026-10-05). Drop the code so nothing downstream
+          // reads it as an exchange in flight, and keep what is stored.
+          if (
+            error?.name === 'AuthPKCEGrantCodeExchangeError' &&
+            error.message === NO_VERIFIER_MESSAGE
+          ) {
+            clearURLParameters(['code', 'signup'])
+            await this._recoverAndRefresh()
+            return { error }
+          }
+
           // failed login attempt via url,
           // remove old session as in verifyOtp, signUp and signInWith*
           await this._removeSession()
@@ -880,9 +906,7 @@ export class FaableAuthClient extends Base {
           // is the app's and leave it alone.
           sentState: true
         },
-        error: new AuthPKCEGrantCodeExchangeError(
-          'No active PKCE code verifier — the authorization flow has expired or was not started'
-        )
+        error: new AuthPKCEGrantCodeExchangeError(NO_VERIFIER_MESSAGE)
       }
     }
     const {
