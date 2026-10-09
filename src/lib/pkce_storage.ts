@@ -9,6 +9,13 @@ type StoredCodeVerifier = {
   redirectType?: string
   returnTo?: string
   /**
+   * El `redirect_uri` EXACTO que se puso en la URL de `/authorize`. Se guarda
+   * para repetirlo idéntico en el canje `/oauth/token` (RFC 6749 §4.1.3): el
+   * server lo comparaba y, al omitirlo, el canje salía `redirect_uri_mismatch`
+   * (§305). No viaja de vuelta en la URL; vive aquí.
+   */
+  redirectUri?: string
+  /**
    * Whether the app put its own `state` in the authorize URL. Read back on
    * the callback to decide if `state` may be wiped from the address bar —
    * see `callbackParamsToClear`.
@@ -27,6 +34,7 @@ type LoadedCodeVerifier = {
   returnTo?: string
   sentState?: boolean
   appState?: unknown
+  redirectUri?: string
 }
 
 const isStoredCodeVerifier = (value: unknown): value is StoredCodeVerifier =>
@@ -44,6 +52,7 @@ export const saveCodeVerifier = async (
     returnTo,
     sentState,
     appState,
+    redirectUri,
     now = Date.now()
   }: {
     verifier: string
@@ -51,6 +60,7 @@ export const saveCodeVerifier = async (
     returnTo?: string
     sentState?: boolean
     appState?: unknown
+    redirectUri?: string
     now?: number
   }
 ): Promise<void> => {
@@ -60,6 +70,9 @@ export const saveCodeVerifier = async (
   }
   if (returnTo) {
     payload.returnTo = returnTo
+  }
+  if (redirectUri) {
+    payload.redirectUri = redirectUri
   }
   if (sentState) {
     payload.sentState = true
@@ -99,6 +112,9 @@ export const loadCodeVerifier = async (
   }
   if (raw.appState !== undefined) {
     loaded.appState = raw.appState
+  }
+  if (raw.redirectUri) {
+    loaded.redirectUri = raw.redirectUri
   }
   return loaded
 }
