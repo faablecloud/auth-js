@@ -92,7 +92,13 @@ export async function getCodeChallengeAndMethod(
   //    URL, so the callback knows if the `state` it finds there is the app's
   //    (keep it) or something the server added (wipe it).
   //  - `appState`: whatever the app wants back on the other side.
-  { sentState, appState }: { sentState?: boolean; appState?: unknown } = {}
+  //  - `redirectUri`: the exact redirect_uri put in the /authorize URL, so the
+  //    token exchange can repeat it identically (RFC 6749 §4.1.3, §305).
+  {
+    sentState,
+    appState,
+    redirectUri
+  }: { sentState?: boolean; appState?: unknown; redirectUri?: string } = {}
 ) {
   const codeVerifier = generatePKCEVerifier()
   await saveCodeVerifier(storage, `${storageKey}-code-verifier`, {
@@ -100,7 +106,8 @@ export async function getCodeChallengeAndMethod(
     redirectType: isPasswordRecovery ? 'PASSWORD_RECOVERY' : undefined,
     returnTo,
     sentState,
-    appState
+    appState,
+    redirectUri
   })
   const codeChallenge = await generatePKCEChallenge(codeVerifier)
   const codeChallengeMethod = codeVerifier === codeChallenge ? 'plain' : 'S256'

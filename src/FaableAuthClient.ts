@@ -914,7 +914,8 @@ export class FaableAuthClient extends Base {
       redirectType = null,
       returnTo = null,
       sentState = false,
-      appState
+      appState,
+      redirectUri
     } = stored
 
     // Antes del canje, y por tanto antes del SIGNED_IN que se emite dentro:
@@ -929,6 +930,9 @@ export class FaableAuthClient extends Base {
         grant_type: 'authorization_code',
         code: authCode,
         code_verifier: codeVerifier,
+        // Repeat the EXACT redirect_uri sent to /authorize (RFC 6749 §4.1.3,
+        // §305). Older stored flows have none — then it is omitted, as before.
+        ...(redirectUri ? { redirect_uri: redirectUri } : {}),
         ...(this.audience ? { audience: this.audience } : {})
       }
     )
@@ -1352,11 +1356,15 @@ export class FaableAuthClient extends Base {
   ) {
     let urlParams: Record<string, any> = params.queryParams || {}
 
+    // Resolved ONCE and reused below so the exact same string is persisted for
+    // the token exchange to replay (RFC 6749 §4.1.3, §305).
+    const redirectUri =
+      params.redirectTo || this.redirectUri || window?.location.origin
+
     const authorize_params: Record<string, any> = {
       client_id: this.clientId,
       response_type: params.response_type,
-      redirect_uri:
-        params.redirectTo || this.redirectUri || window?.location.origin,
+      redirect_uri: redirectUri,
       scope: params.scopes || this._scope()
     }
 
@@ -1372,7 +1380,7 @@ export class FaableAuthClient extends Base {
           this.storageKey,
           false,
           params.returnTo,
-          { sentState, appState: params.appState }
+          { sentState, appState: params.appState, redirectUri }
         )
 
       urlParams = {
