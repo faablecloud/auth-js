@@ -43,7 +43,15 @@ export function parseParametersFromURL(href: string = '') {
 export const callbackParamsToClear = ({
   sentState = false
 }: { sentState?: boolean } = {}): string[] =>
-  sentState ? ['code', 'signup'] : ['code', 'signup', 'state']
+  sentState ? [...CALLBACK_MARKERS] : [...CALLBACK_MARKERS, 'state']
+
+/**
+ * What the auth server adds to EVERY callback and the app never asked for:
+ * the code, the sign-up marker, and `iss` (RFC 9207 — the issuer, on every
+ * `/authorize` response, code or error). Wiped on every way out of a callback,
+ * success or failure; `state` is decided apart (`callbackParamsToClear`).
+ */
+export const CALLBACK_MARKERS = ['code', 'signup', 'iss'] as const
 
 export const clearURLParameters = (delete_params: string[] = []) => {
   const url = new URL(window.location.href)

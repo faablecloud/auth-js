@@ -80,7 +80,7 @@ describe('a callback code whose exchange fails', () => {
       sentState: true
     })
     h.loc.href =
-      'https://app.example.com/area?code=dead_code&signup=true&state=app-state'
+      'https://app.example.com/area?code=dead_code&signup=true&state=app-state&iss=https%3A%2F%2Ftenant.auth.faable.link'
 
     const auth = new FaableAuthClient(config(storage))
     const { error } = await auth.initialize()

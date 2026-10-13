@@ -71,7 +71,7 @@ const landOn = async ({
   appState?: unknown
 }) => {
   h.loc.href =
-    'https://app.example.com/area-privada?code=code_abc&state=a2dd7d12-b39b-4ad8-8300-3c0eebc2a478'
+    'https://app.example.com/area-privada?code=code_abc&state=a2dd7d12-b39b-4ad8-8300-3c0eebc2a478&iss=https%3A%2F%2Ftenant.auth.faable.link'
 
   const storage = inMemoryStorage()
   // Lo que dejó el /authorize de ida.
@@ -115,6 +115,13 @@ describe('limpieza de la URL al volver del login', () => {
 
     expect(url.searchParams.get('code')).toBeNull()
     expect(url.searchParams.get('state')).toBeNull()
+  })
+
+  it('borra el `iss` de RFC 9207 (2026-10-13: se quedaba en `/?iss=…`)', async () => {
+    for (const sentState of [true, false]) {
+      const { url } = await landOn({ sentState })
+      expect(url.searchParams.get('iss')).toBeNull()
+    }
   })
 
   it('deja intacto el `state` de la app', async () => {

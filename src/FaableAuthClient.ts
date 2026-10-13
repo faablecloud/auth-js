@@ -70,6 +70,7 @@ import {
 } from './lib/types'
 import { Session, SignOut } from './lib/types'
 import {
+  CALLBACK_MARKERS,
   callbackParamsToClear,
   clearURLParameters,
   parseParametersFromURL
@@ -642,7 +643,7 @@ export class FaableAuthClient extends Base {
             error?.name === 'AuthPKCEGrantCodeExchangeError' &&
             error.message === NO_VERIFIER_MESSAGE
           ) {
-            clearURLParameters(['code', 'signup'])
+            clearURLParameters([...CALLBACK_MARKERS])
             await this._recoverAndRefresh()
             return { error }
           }
@@ -655,7 +656,7 @@ export class FaableAuthClient extends Base {
           // work again. Left in the URL, a reload replays the same failure and
           // a retry button lands on it. Same strip as the no-verifier case
           // above; `state` is left alone, it may be the app's.
-          if (flow === 'pkce') clearURLParameters(['code', 'signup'])
+          if (flow === 'pkce') clearURLParameters([...CALLBACK_MARKERS])
           await this._removeSession()
 
           return { error }
@@ -773,7 +774,7 @@ export class FaableAuthClient extends Base {
             'Error in URL with unspecified error_description',
           error_code: params.error_code
         }
-        clearURLParameters(['error', 'error_description', 'error_code'])
+        clearURLParameters(['error', 'error_description', 'error_code', 'iss'])
         throw new AuthImplicitGrantRedirectError(
           params.error_description ||
             'Error in URL with unspecified error_description',
@@ -840,7 +841,8 @@ export class FaableAuthClient extends Base {
         'refresh_token',
         'token_type',
         'scope',
-        'signup'
+        'signup',
+        'iss'
       ])
       this._debug('#_getSessionFromURL()', 'clearing window.location.hash')
 

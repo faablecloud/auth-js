@@ -22,6 +22,13 @@ describe('callbackParamsToClear', () => {
     }
   })
 
+  it('el `iss` de RFC 9207 se va siempre: lo pone el servidor en todo callback', () => {
+    // 2026-10-13: admin.faable.com aterrizaba en `/?iss=https%3A%2F%2F…`.
+    for (const sentState of [true, false]) {
+      expect(callbackParamsToClear({ sentState })).toContain('iss')
+    }
+  })
+
   it('sin argumentos asume que la app no mandó nada', () => {
     expect(callbackParamsToClear()).toContain('state')
   })
