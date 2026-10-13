@@ -649,6 +649,13 @@ export class FaableAuthClient extends Base {
 
           // failed login attempt via url,
           // remove old session as in verifyOtp, signUp and signInWith*
+          //
+          // An authorization code is single-use: whatever made this exchange
+          // fail (expired, already redeemed, a network error), it will never
+          // work again. Left in the URL, a reload replays the same failure and
+          // a retry button lands on it. Same strip as the no-verifier case
+          // above; `state` is left alone, it may be the app's.
+          if (flow === 'pkce') clearURLParameters(['code', 'signup'])
           await this._removeSession()
 
           return { error }
