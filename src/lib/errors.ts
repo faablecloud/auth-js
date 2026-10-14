@@ -72,6 +72,14 @@ export type ErrorCode =
   | 'over_sms_send_rate_limit'
   | 'bad_code_verifier'
   | 'user_suspended'
+  // Self-service account (`getCredentials` / `setPassword` / `updateProfile`).
+  | 'reauth_required'
+  | 'invalid_current_password'
+  | 'email_not_verified'
+  | 'password_too_weak'
+  | 'too_many_login_attempts'
+  | 'no_database_connection'
+  | 'invalid_profile_field'
 
 export class AuthError extends Error {
   /**

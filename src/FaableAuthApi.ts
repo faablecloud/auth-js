@@ -1,6 +1,7 @@
 import { BaseLog, BaseLogOptions } from './BaseLog'
 import { AuthApiError, AuthError, AuthRetryableFetchError } from './lib/errors'
-import { _get, _post } from './lib/fetch'
+import { JsonResponse, _get, _patch, _post } from './lib/fetch'
+import { ProfileField, User, UserCredentials } from './lib/types'
 
 export default class FaableAuthApi extends BaseLog {
   constructor(
@@ -51,6 +52,73 @@ export default class FaableAuthApi extends BaseLog {
    * the revoked sessions are refused on their next use; access and id
    * tokens already issued keep working until they expire.
    */
+  /**
+   * Turns a fetch result into `{ data, error }`. No status means the request
+   * never completed — not a verdict, so the caller may retry. A status is the
+   * server's answer, with its stable `error_code`.
+   */
+  private _result<T>(res: JsonResponse<T>): {
+    data: T | null
+    error: AuthError | null
+  } {
+    this._debug(res)
+    if (res.error) {
+      const message =
+        res.error instanceof Error ? res.error.message : String(res.error)
+      const error =
+        res.status === undefined
+          ? new AuthRetryableFetchError(message, 0)
+          : new AuthApiError(message, res.status, res.code)
+      return { data: null, error }
+    }
+    return { data: res.data, error: null }
+  }
+
+  /** `GET /me/credentials` — whether the user has a password, and their connections. */
+  async getCredentials({ access_token }: { access_token: string }) {
+    const url = `${this.base_url}/me/credentials`
+    this._debug(`requesting ${url}`)
+    return this._result(
+      await _get<UserCredentials>(url, { token: access_token })
+    )
+  }
+
+  /** `POST /me/password` — set or change the user's own password. */
+  async setPassword({
+    access_token,
+    password,
+    current_password
+  }: {
+    access_token: string
+    password: string
+    current_password?: string
+  }) {
+    const url = `${this.base_url}/me/password`
+    this._debug(`requesting ${url}`)
+    return this._result(
+      await _post<{ revoked_sessions: number }>(
+        url,
+        { password, ...(current_password ? { current_password } : {}) },
+        { token: access_token }
+      )
+    )
+  }
+
+  /** `PATCH /me` — the user's own profile fields. */
+  async updateProfile({
+    access_token,
+    fields
+  }: {
+    access_token: string
+    fields: ProfileField[]
+  }) {
+    const url = `${this.base_url}/me`
+    this._debug(`requesting ${url}`)
+    return this._result(
+      await _patch<User>(url, { fields }, { token: access_token })
+    )
+  }
+
   async revokeOtherSessions({
     access_token
   }: {

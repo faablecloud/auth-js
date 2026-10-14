@@ -136,3 +136,21 @@ export const _get = async <T>(
     return { data: null, error: e }
   }
 }
+
+export const _patch = async <T>(
+  url: string,
+  data: object,
+  options: Partial<RequestInitWithToken> = {}
+): Promise<JsonResponse<T>> => {
+  try {
+    const res = await fetch(url, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      headers: { ...headers(options), 'Content-Type': 'application/json' }
+    })
+
+    return await _handleRes(res, options)
+  } catch (e) {
+    return { data: null, error: e }
+  }
+}

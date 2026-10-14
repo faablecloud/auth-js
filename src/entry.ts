@@ -28,6 +28,7 @@ import type {
   JwtClaims,
   LastUsedCookieOptions,
   OAuthResponse,
+  ProfileField,
   Provider,
   SignInWithOAuthConnection,
   SignOut,
@@ -35,7 +36,9 @@ import type {
   SignupParams,
   SignupResult,
   Subscription,
-  SupportedStorage
+  SupportedStorage,
+  UserConnection,
+  UserCredentials
 } from './lib/types'
 import { unwrap } from './lib/unwrap'
 
@@ -75,5 +78,8 @@ export type {
   JwtClaims,
   SignupParams,
   SignupLoginOptions,
-  SignupResult
+  SignupResult,
+  ProfileField,
+  UserConnection,
+  UserCredentials
 }

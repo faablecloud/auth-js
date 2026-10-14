@@ -68,7 +68,7 @@ import {
   AuthResponse,
   FaableAuthClientConfig
 } from './lib/types'
-import { Session, SignOut } from './lib/types'
+import { ProfileField, Session, SignOut, UserCredentials } from './lib/types'
 import {
   CALLBACK_MARKERS,
   callbackParamsToClear,
@@ -2130,6 +2130,123 @@ export class FaableAuthClient extends Base {
       data: data ?? null,
       error: error ? new AuthUnknownError(String(error), error) : null
     }
+  }
+
+  /**
+   * How the signed-in user can sign in: whether they have a password, and
+   * which connections (Google, GitHub, the password one…) they are linked to.
+   *
+   * Use it to choose between "Set a password" and "Change password" on a
+   * profile screen. Made with the session's access token; no provider tokens
+   * or profile data come back.
+   *
+   * @example
+   * ```ts
+   * const { data, error } = await auth.getCredentials()
+   * // data: { has_password: false,
+   * //         connections: [{ id: 'connection_…', name: 'google', type: 'google_oauth2' }] }
+   * ```
+   * @see {@link https://faable.com/docs/auth/self-service-account | Self-service account}
+   * @category Account
+   */
+  async getCredentials(): Promise<AuthResult<UserCredentials>> {
+    return this._withAccessToken(access_token =>
+      this.api.getCredentials({ access_token })
+    )
+  }
+
+  /**
+   * Sets or changes the signed-in user's password, without leaving the app.
+   *
+   * - **Changing** an existing password needs `current_password`.
+   * - **Setting the first one** (a user who signed up with Google, say) needs
+   *   a verified email and a recent sign-in: within 5 minutes and, if the user
+   *   has a second factor, one that completed it. Otherwise the error code is
+   *   `reauth_required`: send the user through {@link FaableAuthClient.authorize}
+   *   with `max_age=0` and call again with the new session.
+   *
+   * The connection's password policy applies (`password_too_weak`). Every
+   * other session of the user is signed out; this one stays. The user gets a
+   * security email.
+   *
+   * @param params
+   *   - `password`: the new password.
+   *   - `current_password`: required when the user already has one.
+   * @example
+   * ```ts
+   * const { data, error } = await auth.setPassword({ password: newPassword })
+   * if (error?.code === 'reauth_required') {
+   *   // Back here after a fresh sign-in, then retry.
+   *   await auth.authorize({ queryParams: { max_age: '0' } })
+   * }
+   * // data: { revoked_sessions: 2 }
+   * ```
+   * @see {@link https://faable.com/docs/auth/self-service-account | Self-service account}
+   * @category Account
+   */
+  async setPassword(params: {
+    password: string
+    current_password?: string
+  }): Promise<AuthResult<{ revoked_sessions: number }>> {
+    if (!params?.password) {
+      return {
+        data: null,
+        error: new AuthUnknownError('password is required', null)
+      }
+    }
+    return this._withAccessToken(access_token =>
+      this.api.setPassword({ access_token, ...params })
+    )
+  }
+
+  /**
+   * Writes the signed-in user's custom profile fields, stored in
+   * `user_metadata["faable.com/fields"]`.
+   *
+   * Only the keys the application declares (`profile_fields` on the client,
+   * else on the tenant) are accepted; any other key, or a value that does not
+   * match its declaration, fails the whole call with `invalid_profile_field`.
+   * Fields are merged by key: keys not named are kept, `value: null` removes
+   * one. The rest of `user_metadata` is untouched.
+   *
+   * @param params
+   *   - `fields`: `[{ key, value }]`, at most 20.
+   * @example
+   * ```ts
+   * const { data: user, error } = await auth.updateProfile({
+   *   fields: [{ key: 'profile', value: 'teacher' }]
+   * })
+   * ```
+   * @see {@link https://faable.com/docs/auth/self-service-account | Self-service account}
+   * @category Account
+   */
+  async updateProfile(params: {
+    fields: ProfileField[]
+  }): Promise<AuthResult<User>> {
+    if (!params?.fields?.length) {
+      return {
+        data: null,
+        error: new AuthUnknownError('fields is required', null)
+      }
+    }
+    return this._withAccessToken(access_token =>
+      this.api.updateProfile({ access_token, fields: params.fields })
+    )
+  }
+
+  /**
+   * Runs `fn` with the current session's access token, or reports the
+   * session as missing without sending anything.
+   */
+  private async _withAccessToken<T>(
+    fn: (access_token: string) => Promise<AuthResult<T>>
+  ): Promise<AuthResult<T>> {
+    const { data, error } = await this.getSession()
+    const access_token = data?.session?.access_token
+    if (error || !access_token) {
+      return { data: null, error: error || new AuthSessionMissingError() }
+    }
+    return fn(access_token)
   }
 
   /**
