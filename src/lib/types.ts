@@ -34,6 +34,33 @@ export class User {
 }
 
 /**
+ * A connection the user is linked to, as {@link FaableAuthClient.getCredentials}
+ * returns it. Never carries provider tokens or profile data.
+ */
+export type UserConnection = {
+  /** The Connection id (`connection_xxx`). */
+  id: string
+  /** The Connection name. */
+  name: string
+  /** The Connection type: `database`, `google_oauth2`, `github`, … */
+  type: string
+}
+
+/** How the signed-in user can sign in. */
+export type UserCredentials = {
+  /** Whether the user has a password (a `database` credential with one set). */
+  has_password: boolean
+  /** Every connection the user is linked to. */
+  connections: UserConnection[]
+}
+
+/**
+ * One custom profile field, stored in `user_metadata["faable.com/fields"]`.
+ * `value: null` removes the key.
+ */
+export type ProfileField = { key: string; value: string | null }
+
+/**
  * Decoded payload of the session's access token, as returned by
  * {@link FaableAuthClient.getClaims}. Standard JWT / OAuth claims are typed;
  * custom claims set by the tenant (a connection's `claims_mapping` or an

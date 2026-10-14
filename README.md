@@ -142,6 +142,33 @@ const { data, error } = await auth.signInWithOtp({
 await auth.changePassword({ email: 'user@example.com' })
 ```
 
+### Account: password and profile fields
+
+With the signed-in user's session, no `client_secret` and no Management API:
+
+```ts
+// "Set a password" or "Change password"?
+const { data } = await auth.getCredentials()
+// data: { has_password: false, connections: [{ id, name, type: 'google_oauth2' }] }
+
+// Change it (the current password is required)…
+await auth.setPassword({ password: next, current_password: current })
+
+// …or set the first one. That needs a verified email and a recent sign-in
+// (with the second factor, if the user has one); otherwise `reauth_required`.
+const { error } = await auth.setPassword({ password: next })
+if (error?.code === 'reauth_required') {
+  await auth.authorize({ queryParams: { max_age: '0' } })
+}
+
+// The app's own profile fields, in user_metadata["faable.com/fields"]. Only
+// keys declared in the client's (or tenant's) `profile_fields` are accepted.
+await auth.updateProfile({ fields: [{ key: 'profile', value: 'teacher' }] })
+```
+
+Setting or changing the password signs the user out of every **other** session
+and sends them a security email.
+
 ### Sign out
 
 By default `signOut()` (global scope, in a browser) **navigates the page to the
