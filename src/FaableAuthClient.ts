@@ -2275,6 +2275,26 @@ export class FaableAuthClient extends Base {
   }
 
   /**
+   * Ends every other session of the signed-in user — other browsers, apps
+   * and CLI logins — and keeps this one. Same as `signOut({ scope: 'others' })`,
+   * plus how many were ended. Their refresh tokens are refused on next use;
+   * access tokens already issued keep working until they expire.
+   *
+   * @example
+   * ```ts
+   * const { data, error } = await auth.revokeOtherSessions()
+   * // data: { revoked: 2 }
+   * ```
+   * @see {@link https://faable.com/docs/auth/self-service-account | Self-service account}
+   * @category Account
+   */
+  async revokeOtherSessions(): Promise<AuthResult<{ revoked: number }>> {
+    return this._withAccessToken(access_token =>
+      this.api.revokeOtherSessions({ access_token })
+    )
+  }
+
+  /**
    * Unlinks one of the signed-in user's social or enterprise accounts (their
    * Google, GitHub, GitLab…), with the provider tokens it held. Pass the
    * connection id from {@link FaableAuthClient.getCredentials}.

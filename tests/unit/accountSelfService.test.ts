@@ -313,3 +313,18 @@ describe('deleteAccount', () => {
     expect(storage.getItem(`${STORAGE_KEY}-${CLIENT_ID}`)).not.toBeNull()
   })
 })
+
+describe('revokeOtherSessions', () => {
+  it('POSTs /me/sessions/revoke-others and returns the count', async () => {
+    net.impl = reply(200, { revoked: 3 })
+    const { data, error } =
+      await client(storageWithSession()).revokeOtherSessions()
+    expect(error).toBeNull()
+    expect(data).toEqual({ revoked: 3 })
+    const call = net.calls.find(c =>
+      c.url.endsWith('/me/sessions/revoke-others')
+    )
+    expect(call?.init.method).toBe('POST')
+    expect(call?.init.headers.Authorization).toBe('Bearer at_1')
+  })
+})

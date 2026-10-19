@@ -180,7 +180,7 @@ if (unlinkError?.code === 'last_sign_in_method') {
 // Where the user is signed in, and "sign out everywhere else".
 const { data: sessions } = await auth.listSessions()
 // sessions: { results: [{ id, user_agent, ip, last_seen_at, … }], current_session_id }
-await auth.signOut({ scope: 'others' })
+const { data: ended } = await auth.revokeOtherSessions() // { revoked: 2 }
 
 // Delete the account. Permanent: confirm first. Clears the local session and
 // emits SIGNED_OUT.

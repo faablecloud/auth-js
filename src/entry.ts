@@ -6,9 +6,11 @@ import {
 import type { SignOutReason } from './FaableAuthClient'
 import { createClient } from './createClient'
 import {
+  AuthApiError,
   AuthError,
   AuthLoginRequiredError,
   AuthMfaRequiredError,
+  isAuthApiError,
   isAuthLoginRequiredError,
   isAuthMfaRequiredError
 } from './lib/errors'
@@ -49,9 +51,11 @@ export {
   Session,
   User,
   FaableAuthClient,
+  AuthApiError,
   AuthError,
   AuthLoginRequiredError,
   AuthMfaRequiredError,
+  isAuthApiError,
   isAuthLoginRequiredError,
   isAuthMfaRequiredError,
   createClient,
