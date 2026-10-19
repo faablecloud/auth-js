@@ -29,6 +29,7 @@ import type {
   LastUsedCookieOptions,
   OAuthResponse,
   ProfileField,
+  ProfileUpdate,
   Provider,
   SignInWithOAuthConnection,
   SignOut,
@@ -38,7 +39,9 @@ import type {
   Subscription,
   SupportedStorage,
   UserConnection,
-  UserCredentials
+  UserCredentials,
+  UserSession,
+  UserSessions
 } from './lib/types'
 import { unwrap } from './lib/unwrap'
 
@@ -80,6 +83,9 @@ export type {
   SignupLoginOptions,
   SignupResult,
   ProfileField,
+  ProfileUpdate,
   UserConnection,
-  UserCredentials
+  UserCredentials,
+  UserSession,
+  UserSessions
 }

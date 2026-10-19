@@ -142,7 +142,7 @@ const { data, error } = await auth.signInWithOtp({
 await auth.changePassword({ email: 'user@example.com' })
 ```
 
-### Account: password and profile fields
+### Account: password, profile, linked accounts and sessions
 
 With the signed-in user's session, no `client_secret` and no Management API:
 
@@ -161,9 +161,30 @@ if (error?.code === 'reauth_required') {
   await auth.authorize({ queryParams: { max_age: '0' } })
 }
 
-// The app's own profile fields, in user_metadata["faable.com/fields"]. Only
-// keys declared in the client's (or tenant's) `profile_fields` are accepted.
-await auth.updateProfile({ fields: [{ key: 'profile', value: 'teacher' }] })
+// Name, company and country, and the app's own profile fields (in
+// user_metadata["faable.com/fields"]; only keys declared in the client's or
+// tenant's `profile_fields` are accepted). Keys left out are not touched.
+await auth.updateProfile({
+  name: 'Ada Lovelace',
+  country_iso: 'GB',
+  fields: [{ key: 'profile', value: 'teacher' }]
+})
+
+// Unlink a Google, GitHub or GitLab account (a connection id from
+// getCredentials). Refused when it is the user's last way to sign in.
+const { error: unlinkError } = await auth.unlinkIdentity(connection_id)
+if (unlinkError?.code === 'last_sign_in_method') {
+  // Ask them to set a password or link another account first.
+}
+
+// Where the user is signed in, and "sign out everywhere else".
+const { data: sessions } = await auth.listSessions()
+// sessions: { results: [{ id, user_agent, ip, last_seen_at, … }], current_session_id }
+await auth.signOut({ scope: 'others' })
+
+// Delete the account. Permanent: confirm first. Clears the local session and
+// emits SIGNED_OUT.
+await auth.deleteAccount()
 ```
 
 Setting or changing the password signs the user out of every **other** session

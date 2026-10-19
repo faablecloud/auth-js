@@ -54,6 +54,47 @@ export type UserCredentials = {
   connections: UserConnection[]
 }
 
+/** One active session of the signed-in user (a browser, a CLI login…). */
+export type UserSession = {
+  /** The session id (`session_xxx`). */
+  id: string
+  status: string
+  ip?: string
+  user_agent?: string
+  /** A name the device gave itself, e.g. the CLI's machine name. */
+  device_name?: string
+  last_seen_at: string
+  expires_at: string
+  createdAt: string
+  updatedAt: string
+  [key: string]: unknown
+}
+
+/** The signed-in user's active sessions, newest first. */
+export type UserSessions = {
+  results: UserSession[]
+  /**
+   * The session this access token was issued in. Null when the token
+   * predates session ids.
+   */
+  current_session_id: string | null
+}
+
+/**
+ * The signed-in user's own profile, as {@link FaableAuthClient.updateProfile}
+ * accepts it. Every key is optional; the ones left out are not touched.
+ */
+export type ProfileUpdate = {
+  /** 1–100 characters. */
+  name?: string
+  /** Stored in `user_metadata`. */
+  company_name?: string
+  /** ISO 3166 code, alpha-2 or alpha-3 (`ES`, `ESP`); stored as alpha-2. */
+  country_iso?: string
+  /** Custom fields the application declares (`profile_fields`), at most 20. */
+  fields?: ProfileField[]
+}
+
 /**
  * One custom profile field, stored in `user_metadata["faable.com/fields"]`.
  * `value: null` removes the key.

@@ -154,3 +154,21 @@ export const _patch = async <T>(
     return { data: null, error: e }
   }
 }
+
+// DELETE. A 204 has no body: `_handleRes` would fail on `res.json()`, and an
+// empty success is still a success.
+export const _delete = async <T>(
+  url: string,
+  options: Partial<RequestInitWithToken> = {}
+): Promise<JsonResponse<T | null>> => {
+  try {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: headers(options)
+    })
+    if (res.status === 204) return { data: null, error: null, status: 204 }
+    return await _handleRes(res, options)
+  } catch (e) {
+    return { data: null, error: e }
+  }
+}

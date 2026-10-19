@@ -3,9 +3,10 @@ import { createClient } from '../../src/createClient'
 import { STORAGE_KEY } from '../../src/lib/constants'
 import type { SupportedStorage } from '../../src/lib/types'
 
-// Self-service account: getCredentials / setPassword / updateProfile call
-// the /me routes with the session's access token, surface the server's
-// error_code as a typed AuthApiError, and send nothing without a session.
+// Self-service account: getCredentials / setPassword / updateProfile /
+// listSessions / unlinkIdentity / deleteAccount call the /me routes with the
+// session's access token, surface the server's error_code as a typed
+// AuthApiError, and send nothing without a session.
 
 const h = vi.hoisted(() => {
   const loc = {
@@ -195,5 +196,120 @@ describe('updateProfile', () => {
     })
     expect(error?.code).toBe('invalid_profile_field')
     expect(error?.status).toBe(400)
+  })
+})
+
+describe('updateProfile — name, company and country', () => {
+  it('sends only the keys given', async () => {
+    net.impl = reply(200, { id: 'user_1', country_iso: 'FR' })
+    const { error } = await client(storageWithSession()).updateProfile({
+      name: 'Ada',
+      country_iso: 'FR'
+    })
+    expect(error).toBeNull()
+    const call = net.calls.find(c => c.url.endsWith('/me'))
+    expect(call?.init.method).toBe('PATCH')
+    expect(JSON.parse(call?.init.body)).toEqual({
+      name: 'Ada',
+      country_iso: 'FR'
+    })
+  })
+
+  it('an empty update is refused before any request', async () => {
+    const { error } = await client(storageWithSession()).updateProfile({})
+    expect(error).not.toBeNull()
+    expect(net.calls.some(c => c.url.includes('/me'))).toBe(false)
+  })
+})
+
+describe('listSessions', () => {
+  it('GETs /me/sessions with the access token', async () => {
+    const body = {
+      results: [{ id: 'session_1', status: 'active' }],
+      current_session_id: 'session_1'
+    }
+    net.impl = reply(200, body)
+    const { data, error } = await client(storageWithSession()).listSessions()
+    expect(error).toBeNull()
+    expect(data).toEqual(body)
+    const call = net.calls.find(c => c.url.endsWith('/me/sessions'))
+    expect(call?.init.method).toBe('GET')
+    expect(call?.init.headers.Authorization).toBe('Bearer at_1')
+  })
+
+  it('without a session it sends nothing', async () => {
+    const { error } = await client(emptyStorage()).listSessions()
+    expect(error?.name).toBe('AuthSessionMissingError')
+    expect(net.calls.some(c => c.url.includes('/me/'))).toBe(false)
+  })
+})
+
+describe('unlinkIdentity', () => {
+  it('DELETEs /me/identities/:connection_id', async () => {
+    net.impl = reply(200, { unlinked: 1 })
+    const { data, error } =
+      await client(storageWithSession()).unlinkIdentity('connection_abc')
+    expect(error).toBeNull()
+    expect(data).toEqual({ unlinked: 1 })
+    const call = net.calls.find(c => c.url.includes('/me/identities/'))
+    expect(call?.url).toBe(
+      'https://tenant.auth.faable.link/me/identities/connection_abc'
+    )
+    expect(call?.init.method).toBe('DELETE')
+    expect(call?.init.headers.Authorization).toBe('Bearer at_1')
+  })
+
+  it('surfaces last_sign_in_method', async () => {
+    net.impl = reply(409, {
+      error_code: 'last_sign_in_method',
+      message: 'This is your only way to sign in.'
+    })
+    const { data, error } =
+      await client(storageWithSession()).unlinkIdentity('connection_abc')
+    expect(data).toBeNull()
+    expect(error?.name).toBe('AuthApiError')
+    expect(error?.status).toBe(409)
+    expect(error?.code).toBe('last_sign_in_method')
+  })
+
+  it('a missing connection id is refused before any request', async () => {
+    const { error } = await client(storageWithSession()).unlinkIdentity('')
+    expect(error).not.toBeNull()
+    expect(net.calls.some(c => c.url.includes('/me/'))).toBe(false)
+  })
+})
+
+describe('deleteAccount', () => {
+  it('DELETEs /me, then removes the local session and emits SIGNED_OUT', async () => {
+    net.impl = async () => ({
+      ok: true,
+      status: 204,
+      // A 204 has no body: reading it as JSON would throw.
+      json: async () => {
+        throw new SyntaxError('Unexpected end of JSON input')
+      }
+    })
+    const storage = storageWithSession()
+    const auth = client(storage)
+    const events: string[] = []
+    auth.onAuthStateChange(event => void events.push(event))
+    const { error } = await auth.deleteAccount()
+    expect(error).toBeNull()
+    const call = net.calls.find(c => c.url.endsWith('/me'))
+    expect(call?.init.method).toBe('DELETE')
+    expect(call?.init.headers.Authorization).toBe('Bearer at_1')
+    expect(storage.getItem(`${STORAGE_KEY}-${CLIENT_ID}`)).toBeNull()
+    expect(events).toContain('SIGNED_OUT')
+  })
+
+  it('a refusal keeps the session', async () => {
+    net.impl = reply(403, {
+      error_code: 'user_suspended',
+      message: 'user is suspended'
+    })
+    const storage = storageWithSession()
+    const { error } = await client(storage).deleteAccount()
+    expect(error?.code).toBe('user_suspended')
+    expect(storage.getItem(`${STORAGE_KEY}-${CLIENT_ID}`)).not.toBeNull()
   })
 })

@@ -1,7 +1,7 @@
 import { BaseLog, BaseLogOptions } from './BaseLog'
 import { AuthApiError, AuthError, AuthRetryableFetchError } from './lib/errors'
-import { JsonResponse, _get, _patch, _post } from './lib/fetch'
-import { ProfileField, User, UserCredentials } from './lib/types'
+import { JsonResponse, _delete, _get, _patch, _post } from './lib/fetch'
+import { ProfileUpdate, User, UserCredentials, UserSessions } from './lib/types'
 
 export default class FaableAuthApi extends BaseLog {
   constructor(
@@ -46,12 +46,6 @@ export default class FaableAuthApi extends BaseLog {
     }
   }
 
-  /**
-   * `POST /me/sessions/revoke-others` — ends every session of the user
-   * except the one this access token belongs to. Refresh tokens issued in
-   * the revoked sessions are refused on their next use; access and id
-   * tokens already issued keep working until they expire.
-   */
   /**
    * Turns a fetch result into `{ data, error }`. No status means the request
    * never completed — not a verdict, so the caller may retry. A status is the
@@ -104,21 +98,53 @@ export default class FaableAuthApi extends BaseLog {
     )
   }
 
-  /** `PATCH /me` — the user's own profile fields. */
+  /** `PATCH /me` — the user's own profile: name, company, country, fields. */
   async updateProfile({
     access_token,
-    fields
-  }: {
-    access_token: string
-    fields: ProfileField[]
-  }) {
+    ...profile
+  }: { access_token: string } & ProfileUpdate) {
     const url = `${this.base_url}/me`
     this._debug(`requesting ${url}`)
     return this._result(
-      await _patch<User>(url, { fields }, { token: access_token })
+      await _patch<User>(url, profile, { token: access_token })
     )
   }
 
+  /** `GET /me/sessions` — the user's active sessions, newest first. */
+  async listSessions({ access_token }: { access_token: string }) {
+    const url = `${this.base_url}/me/sessions`
+    this._debug(`requesting ${url}`)
+    return this._result(await _get<UserSessions>(url, { token: access_token }))
+  }
+
+  /** `DELETE /me/identities/:connection_id` — unlink a social account. */
+  async unlinkIdentity({
+    access_token,
+    connection_id
+  }: {
+    access_token: string
+    connection_id: string
+  }) {
+    const url = `${this.base_url}/me/identities/${encodeURIComponent(connection_id)}`
+    this._debug(`requesting ${url}`)
+    return this._result(
+      await _delete<{ unlinked: number }>(url, { token: access_token })
+    )
+  }
+
+  /** `DELETE /me` — delete the user's own account (204). */
+  async deleteAccount({ access_token }: { access_token: string }) {
+    const url = `${this.base_url}/me`
+    this._debug(`requesting ${url}`)
+    return this._result(await _delete<null>(url, { token: access_token }))
+  }
+
+  /**
+   * `POST /me/sessions/revoke-others` — ends every session of the user
+   * except the one this access token belongs to. Refresh tokens issued in
+   * the revoked sessions are refused on their next use; access and id
+   * tokens already issued keep working until they expire.
+   */
   async revokeOtherSessions({
     access_token
   }: {

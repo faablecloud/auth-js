@@ -68,7 +68,13 @@ import {
   AuthResponse,
   FaableAuthClientConfig
 } from './lib/types'
-import { ProfileField, Session, SignOut, UserCredentials } from './lib/types'
+import {
+  ProfileUpdate,
+  Session,
+  SignOut,
+  UserCredentials,
+  UserSessions
+} from './lib/types'
 import {
   CALLBACK_MARKERS,
   callbackParamsToClear,
@@ -2200,38 +2206,138 @@ export class FaableAuthClient extends Base {
   }
 
   /**
-   * Writes the signed-in user's custom profile fields, stored in
-   * `user_metadata["faable.com/fields"]`.
+   * Updates the signed-in user's own profile: `name`, `company_name`,
+   * `country_iso` and the custom `fields`. Keys left out are not touched.
    *
-   * Only the keys the application declares (`profile_fields` on the client,
-   * else on the tenant) are accepted; any other key, or a value that does not
-   * match its declaration, fails the whole call with `invalid_profile_field`.
-   * Fields are merged by key: keys not named are kept, `value: null` removes
-   * one. The rest of `user_metadata` is untouched.
+   * - `country_iso` takes an ISO 3166 code (`ES` or `ESP`) and is stored as
+   *   alpha-2; an unknown code fails with `bad_request`.
+   * - `fields` are stored in `user_metadata["faable.com/fields"]`. Only the
+   *   keys the application declares (`profile_fields` on the client, else on
+   *   the tenant) are accepted; any other key, or a value that does not match
+   *   its declaration, fails the whole call with `invalid_profile_field`.
+   *   Fields are merged by key: keys not named are kept, `value: null`
+   *   removes one. The rest of `user_metadata` is untouched.
    *
-   * @param params
-   *   - `fields`: `[{ key, value }]`, at most 20.
+   * The new values reach the session's claims on the next token refresh
+   * ({@link FaableAuthClient.refreshSession}).
+   *
    * @example
    * ```ts
    * const { data: user, error } = await auth.updateProfile({
+   *   name: 'Ada Lovelace',
+   *   country_iso: 'GB',
    *   fields: [{ key: 'profile', value: 'teacher' }]
    * })
    * ```
    * @see {@link https://faable.com/docs/auth/self-service-account | Self-service account}
    * @category Account
    */
-  async updateProfile(params: {
-    fields: ProfileField[]
-  }): Promise<AuthResult<User>> {
-    if (!params?.fields?.length) {
+  async updateProfile(params: ProfileUpdate): Promise<AuthResult<User>> {
+    const profile: ProfileUpdate = {}
+    if (params?.name !== undefined) profile.name = params.name
+    if (params?.company_name !== undefined)
+      profile.company_name = params.company_name
+    if (params?.country_iso !== undefined)
+      profile.country_iso = params.country_iso
+    if (params?.fields?.length) profile.fields = params.fields
+    if (Object.keys(profile).length === 0) {
       return {
         data: null,
-        error: new AuthUnknownError('fields is required', null)
+        error: new AuthUnknownError(
+          'name, company_name, country_iso or fields is required',
+          null
+        )
       }
     }
     return this._withAccessToken(access_token =>
-      this.api.updateProfile({ access_token, fields: params.fields })
+      this.api.updateProfile({ access_token, ...profile })
     )
+  }
+
+  /**
+   * The signed-in user's active sessions — every browser, app and CLI login —
+   * newest first, and which one is this. For a "Where you're signed in" list.
+   * End the others with `signOut({ scope: 'others' })`.
+   *
+   * @example
+   * ```ts
+   * const { data, error } = await auth.listSessions()
+   * // data: { results: [{ id: 'session_…', user_agent: '…', ip: '…', … }],
+   * //         current_session_id: 'session_…' }
+   * ```
+   * @see {@link https://faable.com/docs/auth/self-service-account | Self-service account}
+   * @category Account
+   */
+  async listSessions(): Promise<AuthResult<UserSessions>> {
+    return this._withAccessToken(access_token =>
+      this.api.listSessions({ access_token })
+    )
+  }
+
+  /**
+   * Unlinks one of the signed-in user's social or enterprise accounts (their
+   * Google, GitHub, GitLab…), with the provider tokens it held. Pass the
+   * connection id from {@link FaableAuthClient.getCredentials}.
+   *
+   * Refused with `last_sign_in_method` when it would leave the user with no
+   * way to sign in: no password, no account on another connection and no
+   * passwordless email sign-in. Offer to set a password
+   * ({@link FaableAuthClient.setPassword}) or link another account first.
+   * The user's sessions stay.
+   *
+   * @param connection_id - the connection to unlink (`connection_…`).
+   * @example
+   * ```ts
+   * const { data, error } = await auth.unlinkIdentity('connection_…')
+   * if (error?.code === 'last_sign_in_method') {
+   *   // "Set a password first"
+   * }
+   * // data: { unlinked: 1 }
+   * ```
+   * @see {@link https://faable.com/docs/auth/self-service-account | Self-service account}
+   * @category Account
+   */
+  async unlinkIdentity(
+    connection_id: string
+  ): Promise<AuthResult<{ unlinked: number }>> {
+    if (!connection_id) {
+      return {
+        data: null,
+        error: new AuthUnknownError('connection_id is required', null)
+      }
+    }
+    return this._withAccessToken(access_token =>
+      this.api.unlinkIdentity({ access_token, connection_id })
+    )
+  }
+
+  /**
+   * Deletes the signed-in user's account: their identities, credentials,
+   * second factors and memberships go with it. Permanent — ask the user to
+   * confirm first.
+   *
+   * On success the local session is removed and `SIGNED_OUT` is emitted, as
+   * in `signOut({ scope: 'local' })`: the user it belonged to no longer
+   * exists. A suspended user is refused (`user_suspended`).
+   *
+   * @example
+   * ```ts
+   * const { error } = await auth.deleteAccount()
+   * if (!error) router.push('/goodbye')
+   * ```
+   * @see {@link https://faable.com/docs/auth/self-service-account | Self-service account}
+   * @category Account
+   */
+  async deleteAccount(): Promise<AuthResult<null>> {
+    const result = await this._withAccessToken(access_token =>
+      this.api.deleteAccount({ access_token })
+    )
+    if (!result.error) {
+      await this._removeSession()
+      await this.storage.removeItem(`${this.storageKey}-code-verifier`)
+      await this._notifyAllSubscribers('SIGNED_OUT', null)
+    }
+    return { data: null, error: result.error }
   }
 
   /**
