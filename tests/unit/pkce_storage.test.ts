@@ -43,6 +43,17 @@ describe('pkce_storage', () => {
     })
   })
 
+  it('survives a login that took longer than 10 minutes', async () => {
+    // 20-10: a passkey sign-in 10 min 39 s after /authorize came back to a
+    // verifier already thrown away, though the server had accepted the login.
+    const now = 1_700_000_000_000
+    await saveCodeVerifier(storage, KEY, { verifier: 'abc', now })
+    const result = await loadCodeVerifier(storage, KEY, {
+      now: now + 11 * 60 * 1000
+    })
+    expect(result?.verifier).toBe('abc')
+  })
+
   it('returns null when the stored verifier is older than the TTL', async () => {
     const now = 1_700_000_000_000
     await saveCodeVerifier(storage, KEY, { verifier: 'abc', now })

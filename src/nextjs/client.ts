@@ -44,8 +44,9 @@ const DEFAULT_ROUTES: AuthRoutes = {
 }
 
 const DEFAULT_SCOPE = 'openid profile email'
-// A login has this long to come back from the auth server.
-const TX_TTL_SECONDS = 10 * 60
+// A login has this long to come back from the auth server: as long as the
+// server keeps it (an hour), see CODE_VERIFIER_TTL_MS.
+const TX_TTL_SECONDS = 60 * 60
 // Refresh this close to expiry so a token handed out is good for a request.
 const EXPIRY_SKEW_SECONDS = 30
 

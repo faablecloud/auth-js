@@ -184,7 +184,7 @@ describe('login', () => {
     expect(tx).toMatch(/HttpOnly/)
     expect(tx).toMatch(/Secure/)
     expect(tx).toMatch(/SameSite=Lax/)
-    expect(tx).toMatch(/Max-Age=600/)
+    expect(tx).toMatch(/Max-Age=3600/)
   })
 })
 

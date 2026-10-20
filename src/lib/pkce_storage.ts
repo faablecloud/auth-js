@@ -1,7 +1,14 @@
 import { getItemAsync, setItemAsync } from './storage_helpers'
 import type { SupportedStorage } from './types'
 
-export const CODE_VERIFIER_TTL_MS = 10 * 60 * 1000
+// As long as the auth server keeps the login it belongs to (its /authorize
+// state lives an hour, StateStore's default). At 10 minutes a person who took
+// longer on the login screen — reading, fetching an emailed code, setting up a
+// passkey — was signed in by the server and handed a code this side could no
+// longer exchange («No active PKCE code verifier»): 12 of those in the week to
+// 20-10, half of them on a customer's site. The verifier's secrecy is what
+// PKCE rests on, not its age.
+export const CODE_VERIFIER_TTL_MS = 60 * 60 * 1000
 
 type StoredCodeVerifier = {
   verifier: string
