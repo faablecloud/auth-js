@@ -1,6 +1,7 @@
 export { createFaableAuth, FaableAuthNext } from './client'
 export { memorySessionStore } from './store'
 export {
+  verifyAccessToken,
   verifyLogoutToken,
   verifyIdToken,
   BACKCHANNEL_LOGOUT_EVENT

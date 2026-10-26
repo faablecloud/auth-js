@@ -5,7 +5,7 @@ import {
   exportJWK,
   generateKeyPair
 } from 'jose'
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FaableAuthNext, createFaableAuth } from '../../src/nextjs/client'
 import {
   MAX_CHUNK_SIZE,
@@ -15,6 +15,23 @@ import {
   writeChunked
 } from '../../src/nextjs/cookies'
 import { BACKCHANNEL_LOGOUT_EVENT } from '../../src/nextjs/oidc'
+
+// `next` is an optional peer and not installed here: the middleware only
+// needs `NextResponse.next()` / `.redirect()`.
+vi.mock('next/server', () => {
+  class NextResponse extends Response {
+    static next() {
+      return new NextResponse(null, { status: 200 })
+    }
+    static redirect(url: URL | string) {
+      return new NextResponse(null, {
+        status: 307,
+        headers: { location: String(url) }
+      })
+    }
+  }
+  return { NextResponse }
+})
 
 // Backlog §241 — `@faable/auth-js/nextjs`: HttpOnly encrypted cookie, tokens
 // verified against the JWKS, and a back-channel receiver that ends the
@@ -123,7 +140,11 @@ const cookieHeaderFrom = (...responses: Response[]): string => {
 }
 
 /** Runs login → callback for a fresh session and returns the browser's cookie header. */
-const login = async (a: FaableAuthNext, returnTo = '/dashboard') => {
+const login = async (
+  a: FaableAuthNext,
+  returnTo = '/dashboard',
+  accessToken = 'at_1'
+) => {
   const loginRes = await a.handleRequest(
     new Request(
       `${BASE_URL}/auth/login?returnTo=${encodeURIComponent(returnTo)}`
@@ -137,7 +158,7 @@ const login = async (a: FaableAuthNext, returnTo = '/dashboard') => {
   tokenEndpoint = async () => ({
     status: 200,
     body: {
-      access_token: 'at_1',
+      access_token: accessToken,
       refresh_token: 'rt_1',
       id_token: await idToken({ nonce, sid: 'sid_1' }),
       expires_in: 3600,
@@ -573,6 +594,110 @@ describe('getAccessToken', () => {
       })
     )
     expect(r).toBeNull()
+  })
+})
+
+const API = 'https://api.example.com'
+const accessToken = (
+  claims: Record<string, unknown>,
+  opts: { aud?: string; key?: CryptoKey } = {}
+) =>
+  new SignJWT(claims)
+    .setProtectedHeader({ alg: 'RS256', kid: 'k1' })
+    .setIssuer(ISSUER)
+    .setAudience(opts.aud ?? API)
+    .setSubject('user_1')
+    .setIssuedAt()
+    .setExpirationTime('1h')
+    .sign(opts.key ?? privateKey)
+
+describe('permissions', () => {
+  const withAudience = () =>
+    auth({ authorizationParams: { audience: API } } as any)
+  const req = (path: string, cookie?: string) =>
+    new Request(`${BASE_URL}${path}`, {
+      headers: cookie ? { cookie } : {}
+    })
+
+  it('hasPermission verifies the token before trusting its claims', async () => {
+    const a = withAudience()
+    const good = await login(
+      a,
+      '/',
+      await accessToken({ permissions: 'invites:read invites:write' })
+    )
+    expect(await a.hasPermission('invites:write', req('/', good.cookie))).toBe(
+      true
+    )
+    expect(
+      await a.hasPermission(
+        ['invites:write', 'billing:read'],
+        req('/', good.cookie)
+      )
+    ).toBe(false)
+
+    // Same claims, signed by someone else: not trusted.
+    const forged = await login(
+      a,
+      '/',
+      await accessToken(
+        { permissions: 'invites:write' },
+        { key: otherPrivateKey }
+      )
+    )
+    expect(
+      await a.hasPermission('invites:write', req('/', forged.cookie))
+    ).toBe(false)
+    // A token for another Api: not trusted either.
+    const otherApi = await login(
+      a,
+      '/',
+      await accessToken(
+        { permissions: 'invites:write' },
+        { aud: 'https://other.example.com' }
+      )
+    )
+    expect(
+      await a.hasPermission('invites:write', req('/', otherApi.cookie))
+    ).toBe(false)
+    expect(await a.hasPermission('invites:write', req('/'))).toBe(false)
+  })
+
+  it('without an audience the check is a configuration error, not a silent false', async () => {
+    const a = auth()
+    await expect(a.hasPermission('x', req('/'))).rejects.toThrow(/audience/)
+  })
+
+  it('middleware: login for anonymous, 403 without the permission, through with it', async () => {
+    const a = withAudience()
+    const options = {
+      permissions: (r: Request) =>
+        new URL(r.url).pathname.startsWith('/admin')
+          ? ['admin:read']
+          : undefined
+    }
+
+    const anon = await a.middleware(req('/admin/users'), options)
+    expect(anon.status).toBe(307)
+    expect(anon.headers.get('location')).toContain('returnTo=%2Fadmin%2Fusers')
+
+    const viewer = await login(a, '/', await accessToken({ permissions: '' }))
+    expect(
+      (await a.middleware(req('/admin/users', viewer.cookie), options)).status
+    ).toBe(403)
+    // A path that needs nothing passes.
+    expect(
+      (await a.middleware(req('/home', viewer.cookie), options)).status
+    ).toBe(200)
+
+    const admin = await login(
+      a,
+      '/',
+      await accessToken({ permissions: 'admin:read' })
+    )
+    expect(
+      (await a.middleware(req('/admin/users', admin.cookie), options)).status
+    ).toBe(200)
   })
 })
 

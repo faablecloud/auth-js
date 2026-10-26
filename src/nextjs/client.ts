@@ -1,3 +1,4 @@
+import { hasPermissions } from '../lib/claims'
 import {
   deleteChunked,
   deriveKey,
@@ -20,6 +21,7 @@ import {
   refreshTokens,
   remoteJwks,
   userFromClaims,
+  verifyAccessToken,
   verifyIdToken,
   verifyLogoutToken
 } from './oidc'
@@ -483,26 +485,98 @@ export class FaableAuthNext {
    * export const middleware = (req: NextRequest) =>
    *   faableAuth.middleware(req, { protect: req => req.nextUrl.pathname.startsWith('/app') })
    * ```
+   *
+   * `permissions` returns what a request needs (or nothing): anonymous
+   * visitors go to the login like with `protect`, and a user whose verified
+   * access token lacks any of them gets a 403. Needs
+   * `authorizationParams.audience`, as {@link hasPermission}.
+   * ```ts
+   * faableAuth.middleware(req, {
+   *   permissions: req => req.nextUrl.pathname.startsWith('/admin') ? ['admin:read'] : undefined
+   * })
+   * ```
    */
   async middleware(
     req: Request,
-    options: { protect?: (req: Request) => boolean } = {}
+    options: {
+      protect?: (req: Request) => boolean
+      permissions?: (req: Request) => string | string[] | undefined
+    } = {}
   ): Promise<Response> {
     const mod: any = await import('next/server')
     const NextResponse = mod.NextResponse
+    const required = options.permissions?.(req)
+    const audience = required ? this.requireAudience() : undefined
     const result = await this.getAccessToken(req)
-    if (!result && options.protect?.(req)) {
+    if (!result && (required || options.protect?.(req))) {
       const { pathname, search } = new URL(req.url)
       const login = new URL(this.absolute(this.routes.login))
       login.searchParams.set('returnTo', `${pathname}${search}`)
       return NextResponse.redirect(login)
     }
-    const res: Response = NextResponse.next()
+    const res: Response =
+      required &&
+      result &&
+      audience &&
+      !(await this.tokenHasPermissions(result.accessToken, audience, required))
+        ? new NextResponse('Forbidden', { status: 403 })
+        : NextResponse.next()
     for (const c of result?.setCookie ?? []) res.headers.append('set-cookie', c)
     return res
   }
 
+  /**
+   * Does the user's access token carry these permissions (all of them)?
+   * Unlike the browser client's `hasPermission`, the token is VERIFIED here
+   * (JWKS, `iss`, `aud`, `exp`), so the answer can gate a server action.
+   * `false` without a session or with an invalid token.
+   *
+   * Needs `authorizationParams.audience` (your Api identifier): a token for
+   * no Api carries no `permissions` claim. With RBAC on the Api, the token
+   * carries the permissions requested in `authorizationParams.scope` that
+   * the user's roles grant.
+   * ```ts
+   * if (!(await faableAuth.hasPermission('invites:write'))) notFound()
+   * ```
+   */
+  async hasPermission(
+    permission: string | string[],
+    input?: Request | CookieJar
+  ): Promise<boolean> {
+    const audience = this.requireAudience()
+    const result = await this.getAccessToken(input)
+    if (!result) return false
+    return this.tokenHasPermissions(result.accessToken, audience, permission)
+  }
+
   // ---- Internals ------------------------------------------------------------
+
+  private requireAudience(): string {
+    const audience = this.authorizationParams.audience
+    if (!audience) {
+      throw new Error(
+        'FaableAuthNext: permission checks need `authorizationParams.audience` (your Api identifier); without it the access token has no `permissions` claim'
+      )
+    }
+    return audience
+  }
+
+  private async tokenHasPermissions(
+    accessToken: string,
+    audience: string,
+    permission: string | string[]
+  ): Promise<boolean> {
+    try {
+      const claims = await verifyAccessToken(accessToken, {
+        issuer: this.issuer,
+        audience,
+        jwks: this.jwks
+      })
+      return hasPermissions(claims as { permissions?: string }, permission)
+    } catch {
+      return false
+    }
+  }
 
   private get txCookieName() {
     return `${this.cookie.name}_tx`

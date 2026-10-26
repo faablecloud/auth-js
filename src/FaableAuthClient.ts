@@ -2,6 +2,7 @@ import { Base } from './Base'
 import FaableAuthApi from './FaableAuthApi'
 import { buildAndSubmitForm, resolveResponseType } from './lib/auth_helpers'
 import { BroadcastSync } from './lib/broadcast_sync'
+import { hasPermissions, hasRoles } from './lib/claims'
 import { EXPIRY_MARGIN, STORAGE_KEY } from './lib/constants'
 import {
   AuthApiError,
@@ -2863,6 +2864,42 @@ export class FaableAuthClient extends Base {
   async hasAmr(method: string): Promise<boolean> {
     const amr = await this.getClaim<string[]>('amr')
     return Array.isArray(amr) && amr.includes(method)
+  }
+
+  /**
+   * Does the current session's access token carry these permissions (all of
+   * them)? Read from the `permissions` claim, which the API emits with the
+   * `access_token_authz` dialect; with RBAC on the API, a user token carries
+   * the permissions you requested as scopes that the user's roles grant.
+   *
+   * Decoded locally, not verified: use it to show or hide UI. Your API must
+   * check the token itself.
+   *
+   * @example
+   * ```ts
+   * if (await auth.hasPermission('invites:write')) showInviteButton()
+   * ```
+   * @category Sessions
+   */
+  async hasPermission(permission: string | string[]): Promise<boolean> {
+    const { data } = await this.getClaims()
+    return hasPermissions(data.claims, permission)
+  }
+
+  /**
+   * Does the current session's access token carry these roles (all of them)?
+   * Read from the `roles` claim, present when the API enables
+   * `include_roles_in_access_token`. Same caveat as {@link hasPermission}.
+   *
+   * @example
+   * ```ts
+   * const isAdmin = await auth.hasRole('admin')
+   * ```
+   * @category Sessions
+   */
+  async hasRole(role: string | string[]): Promise<boolean> {
+    const { data } = await this.getClaims()
+    return hasRoles(data.claims, role)
   }
 
   /**

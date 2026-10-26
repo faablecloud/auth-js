@@ -5,6 +5,7 @@ import {
 } from './FaableAuthClient'
 import type { SignOutReason } from './FaableAuthClient'
 import { createClient } from './createClient'
+import { hasPermissions, hasRoles, permissionsOf } from './lib/claims'
 import {
   AuthApiError,
   AuthError,
@@ -61,7 +62,10 @@ export {
   createClient,
   cookieStorageAdapter,
   getSessionFromCookies,
-  unwrap
+  unwrap,
+  permissionsOf,
+  hasPermissions,
+  hasRoles
 }
 
 export type {

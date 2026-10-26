@@ -161,6 +161,25 @@ export const verifyIdToken = async (
   return payload
 }
 
+/**
+ * RFC 9068 — what a resource server checks on an access token: signature
+ * against the JWKS, `iss`, `aud` (= the Api identifier), `exp`. Used for the
+ * permission checks, which must not trust a token they only decoded.
+ */
+export const verifyAccessToken = async (
+  accessToken: string,
+  params: { issuer: string; audience: string | string[]; jwks: JWKS }
+): Promise<JWTPayload> => {
+  const { payload } = await jwtVerify(accessToken, params.jwks, {
+    issuer: params.issuer,
+    audience: params.audience,
+    algorithms: ['RS256'],
+    clockTolerance: 60
+  })
+  if (!payload.sub) throw new Error('access_token has no sub')
+  return payload
+}
+
 export const BACKCHANNEL_LOGOUT_EVENT =
   'http://schemas.openid.net/event/backchannel-logout'
 

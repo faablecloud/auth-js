@@ -342,6 +342,32 @@ decisions, never as authorization — that is the resource server's job. Custom
 claims are frozen at login and survive refreshes; they change on the next
 sign-in.
 
+### Roles and permissions
+
+With your Api's `token_dialect` set to `access_token_authz`, the access token
+carries a `permissions` claim; with `include_roles_in_access_token`, a `roles`
+claim. Ask for the Api with `audience` and, when the Api has RBAC enabled,
+request the permissions you need as scopes: the token carries those the user's
+roles grant.
+
+```ts
+const auth = createClient({
+  domain: 'https://my-tenant.auth.faable.link',
+  clientId: '…',
+  audience: 'https://api.example.com',
+  scope: 'openid profile email invites:read invites:write'
+})
+
+if (await auth.hasPermission('invites:write')) showInviteButton()
+const isStaff = await auth.hasRole('staff')
+```
+
+Both require **all** the values you pass. Like `getClaims`, they decode the
+token without verifying it: fine for showing UI, but your API must check the
+token itself (`verifyAccessToken` and `requirePermissions` in
+`@faable/auth-sdk`). The pure helpers `permissionsOf`, `hasPermissions` and
+`hasRoles` work on any decoded claims.
+
 ## Storage adapters
 
 ### Trade-offs
@@ -486,6 +512,22 @@ export const middleware = (req: NextRequest) =>
     protect: req => req.nextUrl.pathname.startsWith('/dashboard')
   })
 export const config = { matcher: ['/((?!_next|favicon.ico).*)'] }
+```
+
+Permissions on the server are checked on the **verified** access token (JWKS,
+`iss`, `aud`, `exp`), so they can gate pages and actions. They need
+`authorizationParams.audience` set to your Api identifier (and, with RBAC on the
+Api, the permissions requested in `authorizationParams.scope`):
+
+```ts
+// Server Component / Server Action
+if (!(await faableAuth.hasPermission('invites:write'))) notFound()
+
+// middleware.ts — anonymous → login, signed in without the permission → 403
+faableAuth.middleware(req, {
+  permissions: req =>
+    req.nextUrl.pathname.startsWith('/admin') ? ['admin:read'] : undefined
+})
 ```
 
 When the user signs out of another app in the same SSO session, the auth server
