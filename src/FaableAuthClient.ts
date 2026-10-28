@@ -42,6 +42,12 @@ import {
   saveLoginAttempt
 } from './lib/last_used_storage'
 import { getSessionFromCookies } from './lib/nextjs'
+import {
+  type PendingPasswordless,
+  clearPendingPasswordless,
+  loadPendingPasswordless,
+  savePendingPasswordless
+} from './lib/pending_passwordless'
 import { loadCodeVerifier } from './lib/pkce_storage'
 import { isValidSession } from './lib/session_helpers'
 import { cookieStorageAdapter } from './lib/storage/cookie-storage'
@@ -127,6 +133,52 @@ const REFRESH_TIMEOUT_MS = AUTO_REFRESH_TICK_DURATION + 10 * 1000
  * `storageKey` prefix so multiple clients on one origin don't cross-read.
  */
 const SIGNOUT_REASON_SUFFIX = '-signout-reason'
+
+/**
+ * Error the auth server returned via redirect (`?error=...&
+ * error_description=...`, RFC 6749 §4.1.2.1) on the page we initialized on,
+ * with what this browser remembers of the round trip that failed.
+ *
+ * @see {@link FaableAuthClient.getRedirectError}
+ */
+export type RedirectError = {
+  error: string
+  error_description: string
+  /** Stable machine code the server attached (`identity_already_linked`…). */
+  error_code?: string
+  /**
+   * The connection the failed round trip was started with, as passed to
+   * `signInWithOauthConnection` / `linkOauthConnection`. Absent when the
+   * failure was not a round trip this browser started (or its record
+   * expired).
+   */
+  connection?: string
+  connection_id?: string
+  /** The round trip was a `linkOauthConnection`, not a sign-in. */
+  link?: boolean
+  /** The `appState` the round trip was started with. */
+  appState?: unknown
+  /** The `returnTo` the round trip was started with. */
+  returnTo?: string
+}
+
+/**
+ * The error redirect of this page load, per `storageKey`, consume-once.
+ *
+ * Module scope, not instance scope: an app can hold more than one client for
+ * the same storageKey on one page (the dashboard rebuilds it when its settings
+ * load), and only the one that parsed the URL used to have the error — the
+ * others answered `null`, or each answered with its own copy and one failure
+ * was shown twice. The dashboard kept a page-level flag of its own for it, and
+ * a second caller under React StrictMode still raced the first.
+ *
+ * Holds a promise because the round trip's record is read from storage after
+ * the params are already off the URL.
+ */
+const pageRedirectErrors = new Map<
+  string,
+  { error: Promise<RedirectError>; claimed: boolean }
+>()
 
 /**
  * How long a `?code=` callback may take before the client tells the server it
@@ -215,20 +267,6 @@ export class FaableAuthClient extends Base {
    * the same sign-in — the IP is no key: on 2026-09-30 it changed mid-login.
    */
   protected _callbackCodePrefix: string | null = null
-
-  /**
-   * Error the auth server returned via redirect (`?error=...&
-   * error_description=...`, RFC 6749 §4.1.2.1) on the page we initialized
-   * on. Held for one {@link getRedirectError} read: the promise returned by
-   * `signInWithOauthConnection` dies with the top-level navigation, so
-   * without this stash a server-side deny is invisible to the app
-   * (2026-08-21: ten silent "Connect GitHub" retries).
-   */
-  protected redirectError: {
-    error: string
-    error_description: string
-    error_code?: string
-  } | null = null
 
   protected storageKey: string
 
@@ -680,6 +718,9 @@ export class FaableAuthClient extends Base {
         )
 
         await this._saveSession(session)
+        // Signed in by another route (a magic link, a social button pressed
+        // instead of typing the code): the code is not coming back either.
+        await this.clearPendingPasswordless()
 
         setTimeout(async () => {
           if (redirectType === 'recovery') {
@@ -774,13 +815,18 @@ export class FaableAuthClient extends Base {
         // doesn't replay the failure. The throw below surfaces it to
         // _initialize, which deliberately KEEPS any existing session — this
         // redirect may come from a connect/link attempt by a signed-in user.
-        this.redirectError = {
-          error: params.error || 'unspecified_error',
-          error_description:
-            params.error_description ||
-            'Error in URL with unspecified error_description',
-          error_code: params.error_code
-        }
+        // Stashed before the strip, in the same tick as the parse: no other
+        // client on this page can read these params after it.
+        pageRedirectErrors.set(this.storageKey, {
+          error: this._redirectErrorWithAttempt({
+            error: params.error || 'unspecified_error',
+            error_description:
+              params.error_description ||
+              'Error in URL with unspecified error_description',
+            ...(params.error_code ? { error_code: params.error_code } : {})
+          }),
+          claimed: false
+        })
         clearURLParameters(['error', 'error_description', 'error_code', 'iss'])
         throw new AuthImplicitGrantRedirectError(
           params.error_description ||
@@ -1368,6 +1414,7 @@ export class FaableAuthClient extends Base {
       skipBrowserRedirect?: boolean
       audience?: string
       appState?: unknown
+      link?: boolean
     }
   ) {
     let urlParams: Record<string, any> = params.queryParams || {}
@@ -1396,7 +1443,14 @@ export class FaableAuthClient extends Base {
           this.storageKey,
           false,
           params.returnTo,
-          { sentState, appState: params.appState, redirectUri }
+          {
+            sentState,
+            appState: params.appState,
+            redirectUri,
+            connection: params.connection,
+            connectionId: params.connection_id,
+            link: params.link
+          }
         )
 
       urlParams = {
@@ -1887,6 +1941,7 @@ export class FaableAuthClient extends Base {
 
     session.user = user
     await this._saveSession(session)
+    await this.clearPendingPasswordless()
     await this._notifyAllSubscribers('SIGNED_IN', session)
 
     // OTP is the one interactive flow that establishes the session in-page,
@@ -1967,6 +2022,7 @@ export class FaableAuthClient extends Base {
 
     session.user = user
     await this._saveSession(session)
+    await this.clearPendingPasswordless()
     // Both events, in this order: subscribers that only care about "is there
     // a session" keep working unchanged, and those gating on assurance level
     // get the specific signal they need.
@@ -1987,7 +2043,19 @@ export class FaableAuthClient extends Base {
    *   with the tokens already attached, processed by
    *   {@link FaableAuthClient.initialize} on page load.
    *
+   * A `code` that was sent is remembered until it is spent: read it back
+   * with {@link FaableAuthClient.getPendingPasswordless} when the screen that
+   * asked for it is opened again (another tab, an in-app browser that closed
+   * while the user read the email). Any sign-in or sign-out on this client
+   * forgets it.
+   *
    * @param data The user's email and the delivery mechanism.
+   *   - `authParams`: profile for the account a code creates (signup), as the
+   *     server's `auth_params`.
+   *   - `resumeUrl`: a page of yours the code email links back to, for when
+   *     it is opened where this browser's storage is not. Must be on one of
+   *     the client's registered origins.
+   *   - `appState`: kept with the pending code, never sent.
    * @example
    * ```ts
    * await auth.signInWithPasswordless({
@@ -2002,16 +2070,80 @@ export class FaableAuthClient extends Base {
     email: string
     type: 'code' | 'link'
     audience?: string
+    authParams?: Record<string, string>
+    resumeUrl?: string
+    appState?: unknown
   }): Promise<AuthResult<any>> {
     const audience = data.audience ?? this.audience
     const response = await _post(`${this.domainUrl}/passwordless/start`, {
       client_id: this.clientId,
       email: data.email,
       send: data.type,
-      ...(audience ? { audience } : {})
+      ...(audience ? { audience } : {}),
+      ...(data.authParams ? { auth_params: data.authParams } : {}),
+      ...(data.resumeUrl ? { resume_url: data.resumeUrl } : {})
     })
 
+    if (!response.error && data.type === 'code') {
+      await this.resumePasswordless({
+        email: data.email,
+        sent_at: Date.now(),
+        ...(data.appState !== undefined ? { appState: data.appState } : {})
+      })
+    }
+
     return { data: response.data, error: response.error }
+  }
+
+  /**
+   * The emailed code this browser is waiting for, or `null`. Written by
+   * {@link FaableAuthClient.signInWithPasswordless} (`type: 'code'`) and
+   * forgotten on any sign-in or sign-out of this client, and 30 minutes after
+   * it was written.
+   *
+   * @example
+   * ```ts
+   * const pending = await auth.getPendingPasswordless()
+   * if (pending) showCodeStep(pending.email)
+   * ```
+   * @category Sign in
+   */
+  async getPendingPasswordless(): Promise<PendingPasswordless | null> {
+    try {
+      return await loadPendingPasswordless(this.storage, this.storageKey)
+    } catch (error) {
+      this._debug('#getPendingPasswordless()', 'failed', error)
+      return null
+    }
+  }
+
+  /**
+   * Records a code the user is waiting for that this browser did not ask for
+   * — typically one whose email linked back to your `resumeUrl` from another
+   * device. Same lifecycle as the one `signInWithPasswordless` writes.
+   *
+   * @category Sign in
+   */
+  async resumePasswordless(pending: PendingPasswordless): Promise<void> {
+    try {
+      await savePendingPasswordless(this.storage, this.storageKey, pending)
+    } catch (error) {
+      // Blocked storage: the screen that asked still has it in memory.
+      this._debug('#resumePasswordless()', 'failed', error)
+    }
+  }
+
+  /**
+   * Forgets the pending code ("Change email", "Use another account").
+   *
+   * @category Sign in
+   */
+  async clearPendingPasswordless(): Promise<void> {
+    try {
+      await clearPendingPasswordless(this.storage, this.storageKey)
+    } catch (error) {
+      this._debug('#clearPendingPasswordless()', 'failed', error)
+    }
   }
 
   /**
@@ -2591,7 +2723,8 @@ export class FaableAuthClient extends Base {
           ? { ...(options.queryParams ?? {}), link: 'true' }
           : options.queryParams,
         audience: options.audience,
-        appState: options.appState
+        appState: options.appState,
+        link: options.link
       }
     )
 
@@ -2922,15 +3055,47 @@ export class FaableAuthClient extends Base {
    * ```
    * @category Sessions
    */
-  async getRedirectError(): Promise<{
-    error: string
-    error_description: string
-    error_code?: string
-  } | null> {
+  async getRedirectError(): Promise<RedirectError | null> {
     await this.initializePromise
-    const err = this.redirectError
-    this.redirectError = null
-    return err
+    const entry = pageRedirectErrors.get(this.storageKey)
+    if (!entry || entry.claimed) return null
+    // Claimed before the await: a second caller in the same tick (React
+    // StrictMode runs effects twice) gets `null`, never a second copy.
+    entry.claimed = true
+    return await entry.error
+  }
+
+  /**
+   * The error of an `?error=` redirect, with what the PKCE record of the
+   * round trip that failed remembers: connection, link mode, `appState`,
+   * `returnTo`. The record is spent here — the code it was waiting for is
+   * never coming. Best-effort: without a record (another browser started it,
+   * it expired, storage is blocked) the bare error is still returned.
+   */
+  private async _redirectErrorWithAttempt(
+    base: RedirectError
+  ): Promise<RedirectError> {
+    try {
+      const key = `${this.storageKey}-code-verifier`
+      const attempt = await loadCodeVerifier(this.storage, key)
+      if (!attempt) return base
+      await this.storage.removeItem(key)
+      return {
+        ...base,
+        ...(attempt.connection ? { connection: attempt.connection } : {}),
+        ...(attempt.connectionId
+          ? { connection_id: attempt.connectionId }
+          : {}),
+        ...(attempt.link ? { link: true } : {}),
+        ...(attempt.appState !== undefined
+          ? { appState: attempt.appState }
+          : {}),
+        ...(attempt.returnTo ? { returnTo: attempt.returnTo } : {})
+      }
+    } catch (error) {
+      this._debug('#_redirectErrorWithAttempt()', 'failed', error)
+      return base
+    }
   }
 
   /**
@@ -3526,6 +3691,7 @@ export class FaableAuthClient extends Base {
       if (scope === 'local') {
         await this._removeSession()
         await this.storage.removeItem(`${this.storageKey}-code-verifier`)
+        await this.clearPendingPasswordless()
         await this._notifyAllSubscribers('SIGNED_OUT', null)
         return { error: null }
       }
@@ -3540,6 +3706,7 @@ export class FaableAuthClient extends Base {
         // Tear down local state first — the page unloads on the navigation.
         await this._removeSession()
         await this.storage.removeItem(`${this.storageKey}-code-verifier`)
+        await this.clearPendingPasswordless()
         await this._notifyAllSubscribers('SIGNED_OUT', null)
         windowHelpers.redirect(
           this.getLogoutUrl({ returnTo, idTokenHint: data.session?.id_token })
@@ -3580,6 +3747,7 @@ export class FaableAuthClient extends Base {
       }
       await this._removeSession()
       await this.storage.removeItem(`${this.storageKey}-code-verifier`)
+      await this.clearPendingPasswordless()
       await this._notifyAllSubscribers('SIGNED_OUT', null)
       return { error: revokeError }
     })

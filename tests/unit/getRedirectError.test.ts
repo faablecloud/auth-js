@@ -84,6 +84,70 @@ describe('getRedirectError', () => {
     expect(await auth.getRedirectError()).toBeNull()
   })
 
+  it('says which round trip failed, and spends its PKCE record', async () => {
+    // The error URL names neither the connection nor the mode: what the
+    // browser saved when the round trip left is handed back with it. Until
+    // then the dashboard kept a note of its own of which "Connect" button
+    // left, and a link refused on Google was told "This GitHub account…".
+    const cfg = config()
+    h.loc.href = 'https://app.example.com/settings'
+    const starter = new FaableAuthClient(cfg)
+    await starter.initialize()
+    const { data } = await starter.linkOauthConnection({
+      connection_id: 'connection_google',
+      appState: { provider: 'google' },
+      skipBrowserRedirect: true
+    })
+    expect(data.url).toContain('link=true')
+    const verifierKey = 'faableauth-test-client-code-verifier'
+    expect(cfg.storage.getItem(verifierKey)).not.toBeNull()
+
+    h.loc.href =
+      'https://app.example.com/?error=access_denied&error_code=identity_already_linked&error_description=taken'
+    const auth = new FaableAuthClient(cfg)
+    const err = await auth.getRedirectError()
+    expect(err).toMatchObject({
+      error: 'access_denied',
+      error_code: 'identity_already_linked',
+      connection_id: 'connection_google',
+      link: true,
+      appState: { provider: 'google' }
+    })
+    // The code it was waiting for is never coming.
+    expect(cfg.storage.getItem(verifierKey)).toBeNull()
+  })
+
+  it('is one error per page: every client of the storageKey sees it, once', async () => {
+    // The dashboard holds more than one client for the same storageKey (it is
+    // rebuilt when settings load). Only the one that parsed the URL used to
+    // have the error, so the app kept a page-level flag of its own.
+    const cfg = config()
+    h.loc.href =
+      'https://app.example.com/page?error=access_denied&error_description=denied'
+    const first = new FaableAuthClient(cfg)
+    await first.initialize()
+    // What the strip leaves in a real browser (the harness's replaceState is
+    // a no-op): the rebuilt client finds nothing in the URL.
+    h.loc.href = 'https://app.example.com/page'
+    const rebuilt = new FaableAuthClient(cfg)
+
+    // The rebuilt client, which never saw the URL, has it.
+    expect((await rebuilt.getRedirectError())?.error_description).toBe('denied')
+    expect(await first.getRedirectError()).toBeNull()
+  })
+
+  it('two callers in the same tick (React StrictMode) get one copy', async () => {
+    h.loc.href =
+      'https://app.example.com/page?error=access_denied&error_description=denied'
+    const auth = new FaableAuthClient(config())
+    await auth.initialize()
+    const [a, b] = await Promise.all([
+      auth.getRedirectError(),
+      auth.getRedirectError()
+    ])
+    expect([a, b].filter(Boolean)).toHaveLength(1)
+  })
+
   it('keeps an existing session when the redirect carries an error', async () => {
     // A signed-in user failing a CONNECT round-trip must stay signed in —
     // before this fix _initialize removed the session on any URL error,

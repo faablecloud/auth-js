@@ -110,6 +110,32 @@ if (error) throw error
 window.location.assign(data.url)
 ```
 
+#### When the round trip comes back with an error
+
+A denied sign-in or link (an action deny, an identity already linked to another
+user…) comes back to your redirect target as `?error=…`, and the promise of the
+call that left died with the navigation. Read it once per page load with
+`getRedirectError()`. It carries what the browser remembers of the round trip
+that failed: the connection, whether it was a `linkOauthConnection`, and the
+`appState` it was started with.
+
+```ts
+await auth.linkOauthConnection({
+  connection_id: GOOGLE,
+  appState: { provider: 'google' }
+})
+
+// Back on the page:
+const err = await auth.getRedirectError()
+if (err?.error_code === 'identity_already_linked') {
+  toast(`That ${err.appState?.provider} account belongs to another user`)
+}
+```
+
+It is one error per page for every client with the same `storageKey`, and only
+one caller gets it: a second call — another client instance, or React StrictMode
+running an effect twice — gets `null`.
+
 ### Username + password
 
 ```ts
@@ -135,6 +161,25 @@ const { data, error } = await auth.signInWithOtp({
   otp: '123456'
 })
 ```
+
+A sent code is remembered until it is spent, so the screen that asks for it can
+pick up where it was after a reload, from another tab, or when the in-app
+browser the login was opened in closed while the user read the email. Any
+sign-in or sign-out on the client forgets it.
+
+```ts
+const pending = await auth.getPendingPasswordless()
+if (pending) showCodeStep(pending.email, pending.sent_at)
+
+// "Change email"
+await auth.clearPendingPasswordless()
+```
+
+`signInWithPasswordless` also takes `authParams` (the profile of an account the
+code creates), `resumeUrl` (a page of yours the code email links back to, on one
+of the client's registered origins) and `appState` (kept with the pending code,
+never sent). `resumePasswordless({ email, sent_at })` records a code this
+browser did not ask for, such as one whose email linked back to `resumeUrl`.
 
 ### Password reset
 

@@ -3,7 +3,7 @@ import {
   cookieStorageAdapter,
   getSessionFromCookies
 } from './FaableAuthClient'
-import type { SignOutReason } from './FaableAuthClient'
+import type { RedirectError, SignOutReason } from './FaableAuthClient'
 import { createClient } from './createClient'
 import { hasPermissions, hasRoles, permissionsOf } from './lib/claims'
 import {
@@ -19,6 +19,7 @@ import type {
   LastUsedLoginMethod,
   LastUsedLoginMethodKind
 } from './lib/last_used_storage'
+import type { PendingPasswordless } from './lib/pending_passwordless'
 import { Session, User } from './lib/types'
 import type {
   AuthChangeEvent,
@@ -86,6 +87,8 @@ export type {
   AuthFlowType,
   Provider,
   SignOutReason,
+  RedirectError,
+  PendingPasswordless,
   JwtClaims,
   SignupParams,
   SignupLoginOptions,

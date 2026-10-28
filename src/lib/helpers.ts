@@ -94,11 +94,23 @@ export async function getCodeChallengeAndMethod(
   //  - `appState`: whatever the app wants back on the other side.
   //  - `redirectUri`: the exact redirect_uri put in the /authorize URL, so the
   //    token exchange can repeat it identically (RFC 6749 §4.1.3, §305).
+  //  - `connection`/`connectionId`/`link`: what the round trip was for, handed
+  //    back with a failure (getRedirectError).
   {
     sentState,
     appState,
-    redirectUri
-  }: { sentState?: boolean; appState?: unknown; redirectUri?: string } = {}
+    redirectUri,
+    connection,
+    connectionId,
+    link
+  }: {
+    sentState?: boolean
+    appState?: unknown
+    redirectUri?: string
+    connection?: string
+    connectionId?: string
+    link?: boolean
+  } = {}
 ) {
   const codeVerifier = generatePKCEVerifier()
   await saveCodeVerifier(storage, `${storageKey}-code-verifier`, {
@@ -107,7 +119,10 @@ export async function getCodeChallengeAndMethod(
     returnTo,
     sentState,
     appState,
-    redirectUri
+    redirectUri,
+    connection,
+    connectionId,
+    link
   })
   const codeChallenge = await generatePKCEChallenge(codeVerifier)
   const codeChallengeMethod = codeVerifier === codeChallenge ? 'plain' : 'S256'

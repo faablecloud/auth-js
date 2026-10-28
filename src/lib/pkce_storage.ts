@@ -33,6 +33,15 @@ type StoredCodeVerifier = {
    * viaja en la URL ni llega al servidor, igual que `returnTo`.
    */
   appState?: unknown
+  /**
+   * What the round trip was for, so a failure that comes back as
+   * `?error=…` can say so ({@link FaableAuthClient.getRedirectError}): the
+   * error URL names neither the connection nor the mode, and an app with
+   * several "Connect" buttons had to keep its own note of which one left.
+   */
+  connection?: string
+  connectionId?: string
+  link?: boolean
 }
 
 type LoadedCodeVerifier = {
@@ -42,6 +51,9 @@ type LoadedCodeVerifier = {
   sentState?: boolean
   appState?: unknown
   redirectUri?: string
+  connection?: string
+  connectionId?: string
+  link?: boolean
 }
 
 const isStoredCodeVerifier = (value: unknown): value is StoredCodeVerifier =>
@@ -60,6 +72,9 @@ export const saveCodeVerifier = async (
     sentState,
     appState,
     redirectUri,
+    connection,
+    connectionId,
+    link,
     now = Date.now()
   }: {
     verifier: string
@@ -68,6 +83,9 @@ export const saveCodeVerifier = async (
     sentState?: boolean
     appState?: unknown
     redirectUri?: string
+    connection?: string
+    connectionId?: string
+    link?: boolean
     now?: number
   }
 ): Promise<void> => {
@@ -88,6 +106,15 @@ export const saveCodeVerifier = async (
   // setItemAsync serializa a JSON, donde un undefined desaparece solo.
   if (appState !== undefined) {
     payload.appState = appState
+  }
+  if (connection) {
+    payload.connection = connection
+  }
+  if (connectionId) {
+    payload.connectionId = connectionId
+  }
+  if (link) {
+    payload.link = true
   }
   await setItemAsync(storage, key, payload)
 }
@@ -122,6 +149,15 @@ export const loadCodeVerifier = async (
   }
   if (raw.redirectUri) {
     loaded.redirectUri = raw.redirectUri
+  }
+  if (raw.connection) {
+    loaded.connection = raw.connection
+  }
+  if (raw.connectionId) {
+    loaded.connectionId = raw.connectionId
+  }
+  if (raw.link) {
+    loaded.link = true
   }
   return loaded
 }
