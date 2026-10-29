@@ -1667,15 +1667,39 @@ export class FaableAuthClient extends Base {
     audience?: string
   }): Promise<AuthResult<null>> {
     const audience = data.audience ?? this.audience
+    const redirectUri =
+      data.redirectTo || this.redirectUri || window?.location.origin
+    // OAuth 2.1: a code bound by PKCE, not tokens in the redirect URL. Only
+    // for a login of our own — with a `state` the login continues an
+    // `/authorize` that already set its challenge, and its verifier is the
+    // one stored; minting another here would overwrite it.
+    const pkce =
+      this.flowType === 'pkce' && !data.state
+        ? await getCodeChallengeAndMethod(
+            this.storage,
+            this.storageKey,
+            false,
+            undefined,
+            { redirectUri }
+          )
+        : undefined
     const rawAuthResponse = await _post<string>(
       `${this.domainUrl}/usernamepassword/login`,
       {
         username: data.username,
         password: data.password,
-        redirect_uri:
-          data.redirectTo || this.redirectUri || window?.location.origin,
+        redirect_uri: redirectUri,
         client_id: this.clientId,
         state: data.state,
+        // `plain` (no WebCrypto: an insecure context) is refused by the
+        // server; such a page keeps the old token response.
+        ...(pkce && pkce[1] === 'S256'
+          ? {
+              response_type: 'code',
+              code_challenge: pkce[0],
+              code_challenge_method: pkce[1]
+            }
+          : {}),
         ...(audience ? { audience } : {})
       },
       { raw: true }
