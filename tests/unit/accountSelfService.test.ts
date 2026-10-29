@@ -199,6 +199,31 @@ describe('updateProfile', () => {
   })
 })
 
+describe('updateProfileField', () => {
+  it('PATCHes /me with that one field', async () => {
+    net.impl = reply(200, { id: 'user_1', user_metadata: {} })
+    const { error } = await client(storageWithSession()).updateProfileField(
+      'invite_card',
+      'this-app'
+    )
+    expect(error).toBeNull()
+    const call = net.calls.find(c => c.url.endsWith('/me'))
+    expect(call?.init.method).toBe('PATCH')
+    expect(JSON.parse(call?.init.body)).toEqual({
+      fields: [{ key: 'invite_card', value: 'this-app' }]
+    })
+  })
+
+  it('removes the field with null', async () => {
+    net.impl = reply(200, { id: 'user_1', user_metadata: {} })
+    await client(storageWithSession()).updateProfileField('invite_card', null)
+    const call = net.calls.find(c => c.url.endsWith('/me'))
+    expect(JSON.parse(call?.init.body)).toEqual({
+      fields: [{ key: 'invite_card', value: null }]
+    })
+  })
+})
+
 describe('updateProfile — name, company and country', () => {
   it('sends only the keys given', async () => {
     net.impl = reply(200, { id: 'user_1', country_iso: 'FR' })

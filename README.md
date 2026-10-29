@@ -215,6 +215,9 @@ await auth.updateProfile({
   fields: [{ key: 'profile', value: 'teacher' }]
 })
 
+// One field at a time (null removes it).
+await auth.updateProfileField('profile', 'teacher')
+
 // Unlink a Google, GitHub or GitLab account (a connection id from
 // getCredentials). Refused when it is the user's last way to sign in.
 const { error: unlinkError } = await auth.unlinkIdentity(connection_id)

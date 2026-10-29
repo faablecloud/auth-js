@@ -2388,6 +2388,26 @@ export class FaableAuthClient extends Base {
   }
 
   /**
+   * Sets one custom profile field of the signed-in user, or removes it with
+   * `null`. Shorthand for `updateProfile({ fields: [{ key, value }] })`: the
+   * key must be declared in the application's `profile_fields`, or the call
+   * fails with `invalid_profile_field`. Other fields are kept.
+   *
+   * @example
+   * ```ts
+   * const { error } = await auth.updateProfileField('invite_card', 'this-app')
+   * ```
+   * @see {@link https://faable.com/docs/auth/self-service-account | Self-service account}
+   * @category Account
+   */
+  async updateProfileField(
+    key: string,
+    value: string | null
+  ): Promise<AuthResult<User>> {
+    return this.updateProfile({ fields: [{ key, value }] })
+  }
+
+  /**
    * The signed-in user's active sessions — every browser, app and CLI login —
    * newest first, and which one is this. For a "Where you're signed in" list.
    * End the others with `signOut({ scope: 'others' })`.
