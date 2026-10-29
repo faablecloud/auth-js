@@ -1493,6 +1493,10 @@ export class FaableAuthClient extends Base {
    *
    * @example
    * ```ts
+   * // The tenant's hosted login, with every connection the app offers. With a
+   * // live SSO session it signs the user in without showing anything.
+   * await auth.signInWithOauthConnection()
+   *
    * // Redirects the current window; the promise does not resolve on success.
    * await auth.signInWithOauthConnection({
    *   connection: 'google',
@@ -1511,7 +1515,7 @@ export class FaableAuthClient extends Base {
    * @category Sign in
    */
   async signInWithOauthConnection(
-    credentials: SignInWithOAuthConnection
+    credentials: SignInWithOAuthConnection = {}
   ): Promise<OAuthResponse> {
     return await this._handleConnectionSignIn({
       connection: credentials.connection,

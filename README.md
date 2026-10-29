@@ -76,8 +76,8 @@ await auth.signInWithOauthConnection({ connection: 'google' })
 ### OAuth / social connection
 
 ```ts
-// Use the default connection configured on the tenant
-await auth.signInWithOauthConnection({})
+// The tenant's hosted login (signs in silently with a live SSO session)
+await auth.signInWithOauthConnection()
 
 // Or pick a specific provider (by name or connection_id)
 await auth.signInWithOauthConnection({

@@ -65,6 +65,16 @@ describe('getLogoutUrl', () => {
 })
 
 describe('OAuth connection params', () => {
+  it('goes to the hosted login with no arguments: no connection named', async () => {
+    const auth = createClient(baseConfig)
+    const { data, error } = await auth.signInWithOauthConnection()
+    expect(error).toBeNull()
+    const params = new URL(data!.url!).searchParams
+    expect(params.get('client_id')).toBeTruthy()
+    expect(params.get('connection')).toBeNull()
+    expect(params.get('connection_id')).toBeNull()
+  })
+
   it('emits connection_id when provided', async () => {
     const auth = createClient(baseConfig)
     const { data } = await auth.signInWithOauthConnection({
