@@ -61,7 +61,7 @@ describe('signOut({ redirect: false }) local teardown', () => {
       error: new AuthRetryableFetchError('Failed to fetch', 0)
     })
 
-    const { error } = await auth.signOut({ redirect: false })
+    const { error } = await auth.signOut({ scope: 'global', redirect: false })
 
     expect(error).toBeNull()
     expect(await storage.getItem(SESSION_KEY)).toBeNull()
@@ -74,7 +74,7 @@ describe('signOut({ redirect: false }) local teardown', () => {
       error: new AuthApiError('boom', 500, undefined)
     })
 
-    const { error } = await auth.signOut({ redirect: false })
+    const { error } = await auth.signOut({ scope: 'global', redirect: false })
 
     expect(error).toBeInstanceOf(AuthApiError)
     expect(await storage.getItem(SESSION_KEY)).toBeNull()
@@ -87,7 +87,7 @@ describe('signOut({ redirect: false }) local teardown', () => {
       error: new AuthApiError('unauthorized', 401, undefined)
     })
 
-    const { error } = await auth.signOut({ redirect: false })
+    const { error } = await auth.signOut({ scope: 'global', redirect: false })
 
     expect(error).toBeNull()
     expect(await storage.getItem(SESSION_KEY)).toBeNull()
@@ -100,7 +100,7 @@ describe('signOut({ redirect: false }) local teardown', () => {
   it('sends the session id_token as id_token_hint on the /logout GET', async () => {
     const { auth } = seededClient({ id_token: 'the.id.token' })
 
-    await auth.signOut({ redirect: false })
+    await auth.signOut({ scope: 'global', redirect: false })
 
     expect(mGet).toHaveBeenCalledTimes(1)
     const [url] = mGet.mock.calls[0]
@@ -110,7 +110,7 @@ describe('signOut({ redirect: false }) local teardown', () => {
   it('omits id_token_hint when the session has no id_token (e.g. a password grant)', async () => {
     const { auth } = seededClient()
 
-    await auth.signOut({ redirect: false })
+    await auth.signOut({ scope: 'global', redirect: false })
 
     const [url] = mGet.mock.calls[0]
     expect(new URL(url).searchParams.has('id_token_hint')).toBe(false)

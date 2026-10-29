@@ -809,14 +809,19 @@ export type SignOut = {
   /**
    * Which sessions to log out.
    *
-   * - `'global'` — this browser's session at the auth server (its refresh
-   *   tokens are refused from then on) plus this client's storage (default)
+   * - `'app'` (default) — this app only: its refresh token is revoked at the
+   *   auth server and its storage cleared. The tenant's SSO session stays, so
+   *   the user's other apps on the tenant keep theirs, and the next sign-in
+   *   here comes back without asking
+   * - `'global'` — this browser's session at the auth server (every refresh
+   *   token it issued is refused from then on, in every app of the tenant)
+   *   plus this client's storage
    * - `'local'` — only this client's storage; the server is not told
    * - `'others'` — every other session of the user except this one
    *   (`POST /me/sessions/revoke-others`); the local session stays and no
    *   `SIGNED_OUT` event is fired
    */
-  scope?: 'global' | 'local' | 'others'
+  scope?: 'app' | 'global' | 'local' | 'others'
   /**
    * Whether to end the session with a top-level navigation to the auth
    * server's `/logout` (RP-initiated logout). **Defaults to `true`** for the

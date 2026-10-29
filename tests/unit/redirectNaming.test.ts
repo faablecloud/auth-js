@@ -75,6 +75,14 @@ describe('OAuth connection params', () => {
     expect(params.get('connection_id')).toBeNull()
   })
 
+  it('signIn() is the hosted login too', async () => {
+    const auth = createClient(baseConfig)
+    const { data } = await auth.signIn()
+    const params = new URL(data!.url!).searchParams
+    expect(params.get('client_id')).toBeTruthy()
+    expect(params.get('connection')).toBeNull()
+  })
+
   it('emits connection_id when provided', async () => {
     const auth = createClient(baseConfig)
     const { data } = await auth.signInWithOauthConnection({

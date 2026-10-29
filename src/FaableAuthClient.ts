@@ -1531,6 +1531,25 @@ export class FaableAuthClient extends Base {
   }
 
   /**
+   * Sends the user to the tenant's hosted login, with every connection the
+   * application offers. With a live SSO session (the user signed in to
+   * another app of the tenant) it comes back signed in without showing
+   * anything. Same as {@link signInWithOauthConnection}, which also takes a
+   * specific connection.
+   *
+   * @example
+   * ```ts
+   * await auth.signIn()
+   * await auth.signIn({ returnTo: '/settings' })
+   * ```
+   * @see {@link https://faable.com/docs/auth/hosted-login | Hosted login}
+   * @category Sign in
+   */
+  async signIn(options: SignInWithOAuthConnection = {}): Promise<OAuthResponse> {
+    return this.signInWithOauthConnection(options)
+  }
+
+  /**
    * Links an additional OAuth identity (e.g. GitHub) to the CURRENTLY
    * signed-in user — the identity round-trip proves control of the provider
    * account and attaches it to the session user; it never signs in, never
@@ -2355,8 +2374,10 @@ export class FaableAuthClient extends Base {
    *   Fields are merged by key: keys not named are kept, `value: null`
    *   removes one. The rest of `user_metadata` is untouched.
    *
-   * The new values reach the session's claims on the next token refresh
-   * ({@link FaableAuthClient.refreshSession}).
+   * On success the stored session's `user` is updated in place and
+   * `USER_UPDATED` fires, so `getSession()` and {@link getProfileField}
+   * read the new values right away. The access token's claims follow on
+   * the next refresh ({@link FaableAuthClient.refreshSession}).
    *
    * @example
    * ```ts
@@ -2386,9 +2407,11 @@ export class FaableAuthClient extends Base {
         )
       }
     }
-    return this._withAccessToken(access_token =>
+    const result = await this._withAccessToken(access_token =>
       this.api.updateProfile({ access_token, ...profile })
     )
+    if (result.data) await this._updateSessionUser(result.data)
+    return result
   }
 
   /**
@@ -2409,6 +2432,27 @@ export class FaableAuthClient extends Base {
     value: string | null
   ): Promise<AuthResult<User>> {
     return this.updateProfile({ fields: [{ key, value }] })
+  }
+
+  /**
+   * One custom profile field of the signed-in user (from
+   * `user_metadata["faable.com/fields"]` of the session's user), or `null`
+   * when it is not set or nobody is signed in. Reads the session, no request.
+   *
+   * @example
+   * ```ts
+   * const card = await auth.getProfileField('invite_card')
+   * ```
+   * @see {@link https://faable.com/docs/auth/self-service-account | Self-service account}
+   * @category Account
+   */
+  async getProfileField(key: string): Promise<string | null> {
+    const { data } = await this.getSession()
+    const fields = data?.session?.user?.user_metadata?.['faable.com/fields']
+    const field = Array.isArray(fields)
+      ? fields.find(f => f?.key === key)
+      : undefined
+    return typeof field?.value === 'string' ? field.value : null
   }
 
   /**
@@ -3400,6 +3444,22 @@ export class FaableAuthClient extends Base {
     await setItemAsync(this.storage, this.storageKey, session)
   }
 
+  /**
+   * Merges `user` into the stored session and tells subscribers
+   * (`USER_UPDATED`): what the account routes return is the user as it is now.
+   */
+  private async _updateSessionUser(user: User) {
+    await this.lock._acquireLock(-1, async () => {
+      await this._useSession(async ({ data }) => {
+        const session = data.session
+        if (!session) return
+        const next = { ...session, user: { ...session.user, ...user } }
+        await this._saveSession(next)
+        await this._notifyAllSubscribers('USER_UPDATED', next)
+      })
+    })
+  }
+
   private async _getUser(access_token: string) {
     if (!access_token) throw new Error('Cannot fetch user without token')
     this._debug('#_getUser() begin')
@@ -3648,21 +3708,27 @@ export class FaableAuthClient extends Base {
    * access token JWT itself remains valid until its `exp` — keep that
    * expiry short.
    *
-   * **By default (global scope, in a browser) this navigates the page to the
-   * auth server's `/logout` to also clear the SSO cookie**, then returns to
-   * `returnTo` if given. Without that navigation the SSO session survives on
-   * the auth domain and the next `/authorize` silently re-logs the previous
-   * user — a cross-origin `fetch` cannot clear that cookie. On this path the
-   * returned promise does not resolve (the browser is unloading). Pass
-   * `{ redirect: false }` to keep the legacy fetch-only behaviour, or use
+   * **By default (`'app'` scope) it signs the user out of this app only**: its
+   * refresh token is revoked at the auth server (RFC 7009) and its storage
+   * cleared, with no navigation. The tenant's SSO session stays, so the
+   * user's other apps on the same tenant keep theirs, and the next sign-in
+   * here comes back without asking.
+   *
+   * To end the SSO session too, pass `{ scope: 'global' }`: in a browser the
+   * page navigates to the auth server's `/logout` (a cross-origin `fetch`
+   * cannot clear that cookie) and returns to `returnTo` if given; the
+   * returned promise does not resolve on that path. `{ scope: 'global',
+   * redirect: false }` keeps the legacy fetch-only behaviour, or use
    * {@link FaableAuthClient.getLogoutUrl} to drive the navigation yourself.
    *
    * Scopes:
-   * - `'global'` (default) — ends **this browser's** session at the auth
-   *   server: every refresh token issued in it is refused from then on, and
-   *   in a browser the page navigates to `/logout` to clear the SSO cookie.
-   *   Sessions on other devices are untouched — that is what `'others'` is
-   *   for.
+   * - `'app'` (default) — this app only, as above. The revoke is best-effort:
+   *   the local sign-out happens whatever it answers.
+   * - `'global'` — ends **this browser's** session at the auth server: every
+   *   refresh token issued in it is refused from then on, in every app of the
+   *   tenant, and in a browser the page navigates to `/logout` to clear the
+   *   SSO cookie. Sessions on other devices are untouched — that is what
+   *   `'others'` is for.
    * - `'local'` — only clear this client's storage. Nothing is sent to the
    *   server: the SSO session and its refresh tokens stay valid (no redirect).
    * - `'others'` — `POST /me/sessions/revoke-others`: ends every session of
@@ -3671,17 +3737,17 @@ export class FaableAuthClient extends Base {
    *
    * @example
    * ```ts
-   * await auth.signOut() // global — clears local + auth SSO cookie via redirect
-   * await auth.signOut({ returnTo: 'https://app.example.com/bye' }) // + landing
-   * await auth.signOut({ redirect: false }) // legacy: local + best-effort fetch
-   * await auth.signOut({ scope: 'local' }) // only this device, no redirect
+   * await auth.signOut() // this app only; the user's other apps stay signed in
+   * await auth.signOut({ scope: 'global' }) // + the SSO session, via /logout
+   * await auth.signOut({ scope: 'global', returnTo: 'https://app.example.com/bye' })
+   * await auth.signOut({ scope: 'local' }) // only this device's storage
    * await auth.signOut({ scope: 'others' }) // every other device, stay signed in
    * ```
    * @see {@link https://faable.com/docs/auth/oidc/logout | Logout}
    * @category Sign out
    */
   async signOut(
-    options: SignOut = { scope: 'global' }
+    options: SignOut = { scope: 'app' }
   ): Promise<{ error: AuthError | null }> {
     await this.initializePromise
 
@@ -3691,7 +3757,7 @@ export class FaableAuthClient extends Base {
   }
 
   protected async _signOut(
-    { scope = 'global', redirect, returnTo }: SignOut = { scope: 'global' }
+    { scope = 'app', redirect, returnTo }: SignOut = { scope: 'app' }
   ): Promise<{ error: AuthError | null }> {
     return await this._useSession(async result => {
       const { data, error: sessionError } = result
@@ -3708,6 +3774,28 @@ export class FaableAuthClient extends Base {
         }
         const { error } = await this.api.revokeOtherSessions({ access_token })
         return { error }
+      }
+
+      // App scope (the default): this app's refresh token is revoked at the
+      // server (RFC 7009) and its storage cleared. The tenant's SSO session
+      // stays, so every other app of the tenant keeps its own — signing out of
+      // one app must not sign the person out of all of them. The revoke is
+      // best-effort: whatever it answers, the local teardown runs.
+      if (scope === 'app') {
+        const refresh_token = data.session?.refresh_token
+        let revokeError: AuthError | null = null
+        if (refresh_token) {
+          const { error } = await this.api.revokeToken({
+            token: refresh_token,
+            client_id: this.clientId
+          })
+          if (error && isAuthApiError(error)) revokeError = error
+        }
+        await this._removeSession()
+        await this.storage.removeItem(`${this.storageKey}-code-verifier`)
+        await this.clearPendingPasswordless()
+        await this._notifyAllSubscribers('SIGNED_OUT', null)
+        return { error: revokeError }
       }
 
       // Local scope is storage only, by contract: the SSO session at the auth

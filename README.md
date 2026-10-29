@@ -77,7 +77,7 @@ await auth.signInWithOauthConnection({ connection: 'google' })
 
 ```ts
 // The tenant's hosted login (signs in silently with a live SSO session)
-await auth.signInWithOauthConnection()
+await auth.signIn()
 
 // Or pick a specific provider (by name or connection_id)
 await auth.signInWithOauthConnection({
@@ -215,8 +215,10 @@ await auth.updateProfile({
   fields: [{ key: 'profile', value: 'teacher' }]
 })
 
-// One field at a time (null removes it).
+// One field at a time (null removes it), and reading it back. The session's
+// user is updated on the spot, so getSession() sees the new value too.
 await auth.updateProfileField('profile', 'teacher')
+const profile = await auth.getProfileField('profile') // 'teacher'
 
 // Unlink a Google, GitHub or GitLab account (a connection id from
 // getCredentials). Refused when it is the user's last way to sign in.
@@ -240,26 +242,34 @@ and sends them a security email.
 
 ### Sign out
 
-By default `signOut()` (global scope, in a browser) **navigates the page to the
-auth server's `/logout`** to clear the SSO cookie, then returns to `returnTo` if
-you pass one. This matters: the SSO cookie lives on the auth domain, so a
-cross-origin `fetch` from your app can neither send nor clear it. Without the
-navigation the SSO session survives and the next `signInWith…` silently re-logs
-the previous user, ignoring the requested connection.
+By default `signOut()` signs the user out of **this app only**: its refresh
+token is revoked at the auth server and its storage cleared, without leaving the
+page. The tenant's SSO session stays, so the user's other apps on the same tenant
+(your dashboard, your docs…) keep them signed in, and the next sign-in here comes
+back without asking.
+
+To end the SSO session as well, pass `scope: 'global'`. In a browser that
+**navigates the page to the auth server's `/logout`**, because the SSO cookie
+lives on the auth domain and a cross-origin `fetch` can neither send nor clear it.
 
 ```ts
-await auth.signOut() // clears local + redirects to /logout to clear the SSO cookie
-await auth.signOut({ returnTo: 'https://app.example.com/bye' }) // + landing page
-await auth.signOut({ scope: 'local' }) // only this device's storage, no redirect
+await auth.signOut() // this app only; other apps of the tenant stay signed in
+await auth.signOut({ scope: 'global' }) // + the SSO session: redirects to /logout
+await auth.signOut({ scope: 'global', returnTo: 'https://app.example.com/bye' })
+await auth.signOut({ scope: 'local' }) // only this device's storage, server not told
 await auth.signOut({ scope: 'others' }) // every OTHER device; this one stays signed in
-await auth.signOut({ redirect: false }) // legacy: local + best-effort fetch, no nav
+await auth.signOut({ scope: 'global', redirect: false }) // legacy: best-effort fetch
 ```
 
-Scopes: `global` (default) ends **this browser's** session at the auth server —
-every refresh token issued in it is refused from then on — and, in a browser,
+Scopes: `app` (default) revokes this app's refresh token and clears its storage.
+`global` ends **this browser's** session at the auth server, so every refresh
+token issued in it is refused from then on, in every app, and, in a browser,
 navigates to `/logout`. `local` only clears storage; the server is not told.
 `others` calls `POST /me/sessions/revoke-others`: every other session of the
 user ends, the local one stays, and no `SIGNED_OUT` fires.
+
+> **Upgrading from 2.x:** `signOut()` used to mean `scope: 'global'`. If your
+> sign-out button should end the SSO session, pass `{ scope: 'global' }`.
 
 `returnTo` maps to the OIDC `post_logout_redirect_uri` and **must be registered
 as a logout URL on the client**, or the server responds `400`.

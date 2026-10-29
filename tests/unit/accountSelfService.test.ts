@@ -353,3 +353,35 @@ describe('revokeOtherSessions', () => {
     expect(call?.init.headers.Authorization).toBe('Bearer at_1')
   })
 })
+
+describe('the session follows updateProfile', () => {
+  it('getProfileField reads the new value right after updateProfileField', async () => {
+    const fields = [{ key: 'invite_card', value: 'this-app' }]
+    net.impl = reply(200, {
+      sub: 'user_1',
+      user_metadata: { 'faable.com/fields': fields }
+    })
+    const auth = client(storageWithSession())
+    const events: string[] = []
+    auth.onAuthStateChange(ev => void events.push(ev))
+    expect(await auth.getProfileField('invite_card')).toBeNull()
+
+    await auth.updateProfileField('invite_card', 'this-app')
+    expect(await auth.getProfileField('invite_card')).toBe('this-app')
+    const { data } = await auth.getSession()
+    expect(data.session?.user.user_metadata['faable.com/fields']).toEqual(fields)
+    expect(events).toContain('USER_UPDATED')
+  })
+
+  it('a failed update leaves the session as it was', async () => {
+    net.impl = reply(400, { error_code: 'invalid_profile_field', message: 'no' })
+    const auth = client(storageWithSession())
+    await auth.updateProfileField('role', 'admin')
+    expect(await auth.getProfileField('role')).toBeNull()
+  })
+
+  it('getProfileField is null with no session', async () => {
+    const empty: SupportedStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} }
+    expect(await client(empty).getProfileField('invite_card')).toBeNull()
+  })
+})

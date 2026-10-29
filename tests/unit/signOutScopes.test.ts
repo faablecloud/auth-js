@@ -155,3 +155,40 @@ describe("signOut({ scope: 'local' })", () => {
     expect(events).toContain('SIGNED_OUT')
   })
 })
+
+describe("signOut() — the default 'app' scope", () => {
+  it('revokes this app’s refresh token, clears storage and never goes to /logout', async () => {
+    vi.stubGlobal('document', {})
+    const assign = vi.spyOn(h.loc, 'assign')
+    const auth = client(storageWithSession())
+    const events: string[] = []
+    auth.onAuthStateChange(ev => void events.push(ev))
+
+    const { error } = await auth.signOut()
+    expect(error).toBeNull()
+    const revoke = net.calls.find(c => c.url.endsWith('/oauth/revoke'))
+    expect(revoke?.init.method).toBe('POST')
+    expect(JSON.parse(revoke?.init.body)).toEqual({
+      token: 'rt_1',
+      token_type_hint: 'refresh_token',
+      client_id: CLIENT_ID
+    })
+    expect(net.calls.some(c => c.url.includes('/logout'))).toBe(false)
+    expect(assign).not.toHaveBeenCalled()
+    const { data } = await auth.getSession()
+    expect(data.session).toBeNull()
+    expect(events).toContain('SIGNED_OUT')
+  })
+
+  it('signs out locally even when the revoke cannot be reached', async () => {
+    vi.stubGlobal('document', {})
+    net.impl = async () => {
+      throw new TypeError('Failed to fetch')
+    }
+    const auth = client(storageWithSession())
+    const { error } = await auth.signOut()
+    expect(error).toBeNull()
+    const { data } = await auth.getSession()
+    expect(data.session).toBeNull()
+  })
+})

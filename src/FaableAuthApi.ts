@@ -140,6 +140,38 @@ export default class FaableAuthApi extends BaseLog {
   }
 
   /**
+   * `POST /oauth/revoke` (RFC 7009) — revokes a refresh token issued to this
+   * public client. The server answers 200 for an unknown or foreign token too,
+   * so only a client that fails to authenticate gets an error.
+   */
+  async revokeToken({
+    token,
+    client_id
+  }: {
+    token: string
+    client_id: string
+  }): Promise<{ error: AuthError | null }> {
+    const url = `${this.base_url}/oauth/revoke`
+    this._debug(`requesting ${url}`)
+    const res = await _post(url, {
+      token,
+      token_type_hint: 'refresh_token',
+      client_id
+    })
+    this._debug(res)
+    if (res.error) {
+      const message =
+        res.error instanceof Error ? res.error.message : String(res.error)
+      const error =
+        res.status === undefined
+          ? new AuthRetryableFetchError(message, 0)
+          : new AuthApiError(message, res.status, res.code)
+      return { error }
+    }
+    return { error: null }
+  }
+
+  /**
    * `POST /me/sessions/revoke-others` — ends every session of the user
    * except the one this access token belongs to. Refresh tokens issued in
    * the revoked sessions are refused on their next use; access and id
