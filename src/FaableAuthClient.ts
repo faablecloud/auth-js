@@ -1545,7 +1545,9 @@ export class FaableAuthClient extends Base {
    * @see {@link https://faable.com/docs/auth/hosted-login | Hosted login}
    * @category Sign in
    */
-  async signIn(options: SignInWithOAuthConnection = {}): Promise<OAuthResponse> {
+  async signIn(
+    options: SignInWithOAuthConnection = {}
+  ): Promise<OAuthResponse> {
     return this.signInWithOauthConnection(options)
   }
 

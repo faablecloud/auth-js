@@ -244,13 +244,14 @@ and sends them a security email.
 
 By default `signOut()` signs the user out of **this app only**: its refresh
 token is revoked at the auth server and its storage cleared, without leaving the
-page. The tenant's SSO session stays, so the user's other apps on the same tenant
-(your dashboard, your docs…) keep them signed in, and the next sign-in here comes
-back without asking.
+page. The tenant's SSO session stays, so the user's other apps on the same
+tenant (your dashboard, your docs…) keep them signed in, and the next sign-in
+here comes back without asking.
 
 To end the SSO session as well, pass `scope: 'global'`. In a browser that
 **navigates the page to the auth server's `/logout`**, because the SSO cookie
-lives on the auth domain and a cross-origin `fetch` can neither send nor clear it.
+lives on the auth domain and a cross-origin `fetch` can neither send nor clear
+it.
 
 ```ts
 await auth.signOut() // this app only; other apps of the tenant stay signed in
