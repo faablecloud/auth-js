@@ -8,6 +8,23 @@ import type { SupportedStorage } from '../../src/lib/types'
 // server answered with the implicit default — access AND refresh token in the
 // redirect URL. With PKCE it asks for a code the SDK then exchanges.
 
+// A browser: the case where the SDK picks the flow itself.
+const h = vi.hoisted(() => {
+  const fakeWindow: any = {
+    location: {
+      href: 'https://app.example.com/',
+      origin: 'https://app.example.com'
+    },
+    addEventListener: () => {},
+    removeEventListener: () => {}
+  }
+  return { fakeWindow }
+})
+vi.mock('../../src/lib/globals', () => ({
+  window: h.fakeWindow,
+  document: {}
+}))
+
 vi.mock('../../src/lib/fetch', () => ({
   _post: vi.fn(),
   _get: vi.fn(async () => ({ data: null, error: null }))
@@ -46,6 +63,12 @@ const loginBody = () => {
 }
 
 beforeEach(() => {
+  vi.stubGlobal('document', {})
+  vi.stubGlobal('window', h.fakeWindow)
+  h.fakeWindow.location = {
+    href: 'https://app.example.com/',
+    origin: 'https://app.example.com'
+  }
   mPost.mockReset()
   mPost.mockResolvedValue({ data: null, error: 'nope', status: 400 })
 })
@@ -94,11 +117,43 @@ describe('signInWithUsernamePassword asks for a PKCE-bound code', () => {
     ).toBeFalsy()
   })
 
-  it('an implicit client asks for nothing new', async () => {
+  it('in a browser, flowType implicit still asks for a PKCE code', async () => {
+    // So an app keeps signing in the day its tenant enforces OAuth 2.1.
     const auth = makeClient(inMemoryStorage(), 'implicit')
     await auth.signInWithUsernamePassword({ username: 'a@b.c', password: 'x' })
     const body = loginBody()
-    expect(body.code_challenge).toBeUndefined()
-    expect(body.response_type).toBeUndefined()
+    expect(body.response_type).toBe('code')
+    expect(body.code_challenge_method).toBe('S256')
+  })
+})
+
+describe('authorize() binds a code with PKCE', () => {
+  it('sends an S256 challenge and stores the verifier with the redirect_uri', async () => {
+    const storage = inMemoryStorage()
+    const auth = makeClient(storage, 'implicit')
+    const spy = vi.spyOn(auth, 'buildAuthorizeUrl')
+
+    await auth.authorize({ response_type: 'code', queryParams: { state: 's' } })
+
+    const url = new URL(spy.mock.results.at(-1)!.value as string)
+    expect(url.searchParams.get('response_type')).toBe('code')
+    expect(url.searchParams.get('code_challenge_method')).toBe('S256')
+    expect(url.searchParams.get('code_challenge')).toBeTruthy()
+    expect(url.searchParams.get('state')).toBe('s')
+    const stored = await loadCodeVerifier(
+      storage,
+      'faable-auth-token-test-client-code-verifier'
+    )
+    expect(stored?.verifier).toBeTruthy()
+    expect(stored?.redirectUri).toBe(REDIRECT)
+    expect(stored?.sentState).toBe(true)
+  })
+
+  it('a token request is left as asked', async () => {
+    const auth = makeClient(inMemoryStorage(), 'pkce')
+    const spy = vi.spyOn(auth, 'buildAuthorizeUrl')
+    await auth.authorize({ response_type: 'token' })
+    const url = new URL(spy.mock.results.at(-1)!.value as string)
+    expect(url.searchParams.has('code_challenge')).toBe(false)
   })
 })

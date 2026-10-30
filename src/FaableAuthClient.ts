@@ -287,9 +287,11 @@ export class FaableAuthClient extends Base {
   protected _session: Session | null = null
 
   /**
-   * Initiation flow to use when redirecting to /authorize. Defaults to
-   * PKCE in browsers (recommended for SPAs) and implicit otherwise.
-   * Distinct from the callback-side flow which is detected from URL params.
+   * Initiation flow to use when redirecting to /authorize. Always PKCE in a
+   * browser — it is what a tenant enforcing OAuth 2.1 accepts, and every
+   * other tenant accepts it too, so the app needs no setting to follow its
+   * tenant. `config.flowType` only chooses outside a browser (implicit by
+   * default). Distinct from the callback-side flow, detected from URL params.
    */
   protected flowType: AuthFlowType
 
@@ -370,7 +372,10 @@ export class FaableAuthClient extends Base {
       (msg, ...args) => this._debug(msg, ...args)
     )
 
-    this.flowType = config.flowType ?? (isBrowser() ? 'pkce' : 'implicit')
+    // OAuth 2.1 (§447): a browser asks for a code with PKCE even when the app
+    // still says `implicit` — so the same build keeps signing in the day its
+    // tenant turns `oauth21_enabled` on.
+    this.flowType = isBrowser() ? 'pkce' : (config.flowType ?? 'implicit')
 
     this.lastUsedCookie = config.lastUsedCookie
 
@@ -2729,6 +2734,9 @@ export class FaableAuthClient extends Base {
    * Fire-and-forget: there is no return value because the browser navigates
    * away. The session lands back on your `redirectUri`, where
    * {@link FaableAuthClient.initialize} consumes it on the next page load.
+   * A `code` request from a browser carries a PKCE challenge, whose verifier
+   * that landing exchanges the code with — required on a tenant that
+   * enforces OAuth 2.1.
    *
    * @example
    * ```ts
@@ -2740,7 +2748,7 @@ export class FaableAuthClient extends Base {
    * @see {@link https://faable.com/docs/auth/oauth-flows/authorization-code | Authorization Code with PKCE}
    * @category Authorize URLs
    */
-  authorize(options: {
+  async authorize(options: {
     redirectTo?: string
     scope?: string
     response_type: string
@@ -2750,9 +2758,35 @@ export class FaableAuthClient extends Base {
     /** See {@link FaableAuthClient.buildAuthorizeUrl}. */
     loginMethods?: string | string[]
     queryParams?: { [key: string]: string }
-  }) {
-    const url = this.buildAuthorizeUrl(options)
-    windowHelpers.redirect(url)
+  }): Promise<void> {
+    if (options.response_type !== 'code' || !isBrowser()) {
+      windowHelpers.redirect(this.buildAuthorizeUrl(options))
+      return
+    }
+    // The landing exchanges the code with this verifier and repeats this
+    // exact redirect_uri (RFC 6749 §4.1.3); without one it has nothing to
+    // exchange with, on any tenant.
+    const redirectUri =
+      options.redirectTo || this.redirectUri || window?.location.origin
+    const [codeChallenge, codeChallengeMethod] =
+      await getCodeChallengeAndMethod(
+        this.storage,
+        this.storageKey,
+        false,
+        undefined,
+        { sentState: options.queryParams?.state !== undefined, redirectUri }
+      )
+    windowHelpers.redirect(
+      this.buildAuthorizeUrl({
+        ...options,
+        redirectTo: redirectUri,
+        queryParams: {
+          ...options.queryParams,
+          code_challenge: codeChallenge,
+          code_challenge_method: codeChallengeMethod
+        }
+      })
+    )
   }
 
   /**
@@ -2776,7 +2810,7 @@ export class FaableAuthClient extends Base {
   stepUp(
     options: { redirectTo?: string; scope?: string; audience?: string } = {}
   ) {
-    this.authorize({
+    return this.authorize({
       ...options,
       response_type: isBrowser() ? 'code' : 'token',
       acr_values: 'urn:faable:loa:2',

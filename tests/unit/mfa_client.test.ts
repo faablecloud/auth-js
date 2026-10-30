@@ -141,16 +141,16 @@ describe('buildAuthorizeUrl loginMethods', () => {
     expect(url.searchParams.has('login_methods')).toBe(false)
   })
 
-  it('authorize() carries it to the URL it redirects to', () => {
+  it('authorize() carries it to the URL it redirects to', async () => {
     const auth = client()
     const spy = vi.spyOn(auth, 'buildAuthorizeUrl')
     try {
-      auth.authorize({ response_type: 'code', loginMethods: ['email'] })
+      await auth.authorize({ response_type: 'code', loginMethods: ['email'] })
     } catch {
       // The mocked window cannot navigate; only the URL matters here.
     }
     expect(
-      new URL(spy.mock.results[0].value as string).searchParams.get(
+      new URL(spy.mock.results.at(-1)!.value as string).searchParams.get(
         'login_methods'
       )
     ).toBe('email')

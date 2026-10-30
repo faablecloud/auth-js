@@ -441,7 +441,11 @@ export type FaableAuthClientConfig = {
   authorizationParams?: AuthorizationParams
   cookieDomain?: string
   useRefreshTokens?: boolean
-  /** OAuth flow used when initiating sign-in. Defaults to `'pkce'` in browsers and `'implicit'` elsewhere. */
+  /**
+   * OAuth flow used when initiating sign-in outside a browser (default
+   * `'implicit'`). A browser always uses `'pkce'` — the only flow a tenant
+   * enforcing OAuth 2.1 accepts — whatever this says.
+   */
   flowType?: AuthFlowType
   /**
    * Where to keep the session. Pass `'localStorage'` (default) or `'cookie'`
