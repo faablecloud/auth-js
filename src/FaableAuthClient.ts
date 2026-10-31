@@ -3746,6 +3746,16 @@ export class FaableAuthClient extends Base {
     }
   }
 
+  /**
+   * Posts an auth event to the other tabs of this `storageKey` and to NO
+   * subscriber of this document. For the one case where this document must
+   * not react: it is navigating away (see the redirect path of `_signOut`).
+   */
+  private _notifyOtherTabs(event: AuthChangeEvent, session: Session | null) {
+    this._debug(`#_notifyOtherTabs(${event})`)
+    this.broadcastSync.broadcast(event, session)
+  }
+
   private async _notifyAllSubscribers(
     event: AuthChangeEvent,
     session: Session | null,
@@ -3777,7 +3787,10 @@ export class FaableAuthClient extends Base {
    * To end the SSO session too, pass `{ scope: 'global' }`: in a browser the
    * page navigates to the auth server's `/logout` (a cross-origin `fetch`
    * cannot clear that cookie) and returns to `returnTo` if given; the
-   * returned promise does not resolve on that path. `{ scope: 'global',
+   * returned promise does not resolve on that path, and this document's
+   * `onAuthStateChange` listeners are not told `SIGNED_OUT` (other tabs
+   * are): the page is leaving, and a guard reacting to the event would
+   * start a second navigation racing the first. `{ scope: 'global',
    * redirect: false }` keeps the legacy fetch-only behaviour, or use
    * {@link FaableAuthClient.getLogoutUrl} to drive the navigation yourself.
    *
@@ -3879,7 +3892,14 @@ export class FaableAuthClient extends Base {
         await this._removeSession()
         await this.storage.removeItem(`${this.storageKey}-code-verifier`)
         await this.clearPendingPasswordless()
-        await this._notifyAllSubscribers('SIGNED_OUT', null)
+        // Other tabs hear SIGNED_OUT; THIS document does not. It is about to
+        // leave, and a SIGNED_OUT delivered here first hands its auth guard a
+        // reason to navigate too (`router.push('/login')`), racing the
+        // top-level navigation below. Chrome let the top-level win; Safari on
+        // iOS dropped it (2026-10-31): the SSO session survived the sign-out,
+        // and the Back gesture later restored the signed-out page from the
+        // bfcache, frozen on its loading screen with nothing left to run.
+        await this._notifyOtherTabs('SIGNED_OUT', null)
         windowHelpers.redirect(
           this.getLogoutUrl({ returnTo, idTokenHint: data.session?.id_token })
         )

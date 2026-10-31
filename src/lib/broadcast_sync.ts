@@ -58,6 +58,13 @@ export class BroadcastSync {
     return { subscription }
   }
 
+  /** The other tabs only: nothing in this document is called. */
+  broadcast(event: AuthChangeEvent, session: Session | null): void {
+    if (this.channel) {
+      this.channel.postMessage({ event, session })
+    }
+  }
+
   async notify(
     event: AuthChangeEvent,
     session: Session | null,
