@@ -611,4 +611,4 @@ For the full guides, API reference, and dashboard setup walkthroughs visit
 
 ## License
 
-See [LICENSE.md](LICENSE.md).
+MIT — see [LICENSE](LICENSE).
