@@ -108,6 +108,18 @@ describe('a callback code with no verifier', () => {
     expect(h.loc.href).toBe('https://app.example.com/')
   })
 
+  it('tells the developer why nobody signed in, in the console', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    h.loc.href = 'https://app.example.com/?code=abc'
+
+    const auth = new FaableAuthClient(config(inMemoryStorage()))
+    await auth.initialize()
+
+    expect(warn).toHaveBeenCalledOnce()
+    expect(warn.mock.calls[0][0]).toContain('hand-built /authorize URL')
+    warn.mockRestore()
+  })
+
   it('with nothing stored, still leaves the user signed out', async () => {
     const storage = inMemoryStorage()
     h.loc.href = 'https://app.example.com/?code=abc'

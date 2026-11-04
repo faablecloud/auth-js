@@ -202,6 +202,18 @@ const CALLBACK_STALL_REPORT_MS = 15 * 1000
 const NO_VERIFIER_MESSAGE =
   'No active PKCE code verifier — the authorization flow has expired or was not started'
 
+/**
+ * What the developer sees of that same case. The report only reaches the
+ * tenant's logs and the page shows nothing: a `/authorize` URL built by hand
+ * lands on a working `?code=` that this client cannot exchange, and the sign-in
+ * just does not happen, with nothing to go on.
+ */
+const NO_VERIFIER_WARNING =
+  'Faable Auth: this page received a ?code= it cannot exchange, so nobody was signed in. ' +
+  'The client holds no PKCE verifier for it: the login was not started by this SDK in this browser. ' +
+  'Start it with signIn() or signInWithOauthConnection() rather than a hand-built /authorize URL. ' +
+  'https://faable.com/docs/auth/oauth-2-1#before-you-turn-it-on'
+
 /** A callback page load being watched: see `_watchCallback`. */
 type CallbackWatch = {
   startedAt: number
@@ -963,6 +975,7 @@ export class FaableAuthClient extends Base {
     )
     if (!stored) {
       this._reportSdk('callback_no_verifier')
+      console.warn(NO_VERIFIER_WARNING)
       return {
         data: {
           user: null,
