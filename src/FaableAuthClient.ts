@@ -3052,8 +3052,8 @@ export class FaableAuthClient extends Base {
    *
    * @example
    * ```ts
-   * const { data } = await auth.getClaims<{ 'ciapol.com/station_id': string }>()
-   * const station = data.claims?.['ciapol.com/station_id']
+   * const { data } = await auth.getClaims<{ 'example.com/station_id': string }>()
+   * const station = data.claims?.['example.com/station_id']
    * ```
    * @category Sessions
    */
@@ -3088,7 +3088,7 @@ export class FaableAuthClient extends Base {
    *
    * @example
    * ```ts
-   * const station = await auth.getClaim<string>('ciapol.com/station_id')
+   * const station = await auth.getClaim<string>('example.com/station_id')
    * ```
    * @category Sessions
    */

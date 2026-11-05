@@ -72,19 +72,19 @@ describe('getClaims', () => {
           exp: now + 3600,
           iat: now,
           scope: 'openid profile',
-          'ciapol.com/station_id': 'station_123456789',
-          'ciapol.com/tags': ['a', 'b']
+          'example.com/station_id': 'station_123456789',
+          'example.com/tags': ['a', 'b']
         })
       )
     )
     const { data, error } = await client().getClaims<{
-      'ciapol.com/station_id': string
+      'example.com/station_id': string
     }>()
     expect(error).toBeNull()
     expect(data.claims?.sub).toBe('user_1')
     expect(data.claims?.scope).toBe('openid profile')
-    expect(data.claims?.['ciapol.com/station_id']).toBe('station_123456789')
-    expect(data.claims?.['ciapol.com/tags']).toEqual(['a', 'b'])
+    expect(data.claims?.['example.com/station_id']).toBe('station_123456789')
+    expect(data.claims?.['example.com/tags']).toEqual(['a', 'b'])
     expect(data.session?.access_token).toBeTruthy()
   })
 
@@ -106,14 +106,14 @@ describe('getClaims', () => {
   it('getClaim returns one claim, null when absent or signed out', async () => {
     mockSession(
       sessionWith(
-        jwtWith({ sub: 'user_1', 'ciapol.com/station_id': 'station_123456789' })
+        jwtWith({ sub: 'user_1', 'example.com/station_id': 'station_123456789' })
       )
     )
-    expect(await client().getClaim<string>('ciapol.com/station_id')).toBe(
+    expect(await client().getClaim<string>('example.com/station_id')).toBe(
       'station_123456789'
     )
     expect(await client().getClaim('missing')).toBeNull()
     mockSession(null)
-    expect(await client().getClaim('ciapol.com/station_id')).toBeNull()
+    expect(await client().getClaim('example.com/station_id')).toBeNull()
   })
 })

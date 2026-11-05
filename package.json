@@ -26,7 +26,7 @@
     "./package.json": "./package.json"
   },
   "sideEffects": false,
-  "homepage": "https://github.com/faablecloud/auth-js#readme",
+  "homepage": "https://faable.com/docs/auth",
   "devDependencies": {
     "@babel/plugin-transform-nullish-coalescing-operator": "^7.27.1",
     "@babel/preset-env": "^7.27.2",

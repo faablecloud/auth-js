@@ -1,26 +1,28 @@
 <p align="center">
-  <a href="https://faable.com">
-    <img src="https://www.faable.com/assets/logo/Emblem.png" height="96">
-    <h3 align="center">Faable</h3>
+  <a href="https://faable.com/docs/auth">
+    <img src="https://raw.githubusercontent.com/faablecloud/auth-js/main/.github/assets/cover.png" alt="@faable/auth-js: sign-in for any JavaScript app, browser or server" width="100%">
   </a>
 </p>
 
 <p align="center">
-  <a href="https://faable.com">
-    <h1 align="center">auth-js</h1>
-  </a>
-  <p align="center">An isomorphic JavaScript client for Faable Auth.</p>
+  <a href="https://www.npmjs.com/package/@faable/auth-js"><img alt="npm version" src="https://img.shields.io/npm/v/@faable/auth-js.svg?labelColor=121a29&color=7270ee"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-7270ee?labelColor=121a29"></a>
+  <a href="https://faable.com/docs/auth"><img alt="Documentation" src="https://img.shields.io/badge/docs-faable.com-7270ee?labelColor=121a29"></a>
 </p>
 
-<p align="center">
-  <a aria-label="NPM version" href="https://www.npmjs.com/package/@faable/auth-js">
-    <img alt="" src="https://img.shields.io/npm/v/@faable/auth-js.svg?style=for-the-badge&labelColor=000000">
-  </a>
-</p>
+# @faable/auth-js
 
-<p align="center">
-  📚 Full documentation at <a href="https://faable.com/docs">faable.com/docs</a>
-</p>
+An isomorphic JavaScript client for [Faable Auth](https://faable.com/docs/auth). Use it to sign
+users in from the browser, or from the server with the Next.js helpers.
+
+📚 Guides: [faable.com/docs/auth](https://faable.com/docs/auth) · API reference:
+[faablecloud.github.io/auth-js](https://faablecloud.github.io/auth-js/)
+
+**Contents:** [Features](#features) · [Install](#install) · [Quick start](#quick-start) ·
+[Configuration](#configuration) · [Authentication flows](#authentication-flows) ·
+[Error handling](#error-handling) · [Sessions](#sessions-and-state-changes) ·
+[Storage adapters](#storage-adapters) · [Next.js](#nextjs--server-side) ·
+[Support](#support) · [License](#license)
 
 ## Features
 
@@ -383,17 +385,17 @@ Custom claims your tenant puts on the access token — a connection's
 two ways:
 
 - On the user: `/me` returns them as top-level properties, so
-  `session.user['ciapol.com/station_id']` just works.
+  `session.user['example.com/station_id']` just works.
 - Decoded from the token, without a request:
 
 ```ts
 // Typed by namespace; refreshes an expired session first, like getSession()
-const { data } = await auth.getClaims<{ 'ciapol.com/station_id': string }>()
-data.claims?.['ciapol.com/station_id'] // 'station_123456789'
+const { data } = await auth.getClaims<{ 'example.com/station_id': string }>()
+data.claims?.['example.com/station_id'] // 'station_123456789'
 data.claims?.scope // standard claims are typed too
 
 // One claim, or null when signed out / absent
-const station = await auth.getClaim<string>('ciapol.com/station_id')
+const station = await auth.getClaim<string>('example.com/station_id')
 ```
 
 The token is decoded, not signature-verified: use claims for UI and routing
@@ -606,9 +608,20 @@ use it for convenience only, never as authorization. New apps use the
 
 ## Documentation
 
-For the full guides, API reference, and dashboard setup walkthroughs visit
-[faable.com/docs](https://faable.com/docs).
+- [Faable Auth guides](https://faable.com/docs/auth)
+- [Quickstarts](https://faable.com/docs/auth/quickstart) for React, Next.js, Vue, Nuxt, Angular,
+  SvelteKit and React Native
+- [API reference](https://faablecloud.github.io/auth-js/)
+
+## Support
+
+- **Documentation:** [faable.com/docs](https://faable.com/docs)
+- **Help with your account or deployments:** [support@faable.com](mailto:support@faable.com) or the
+  [support page](https://faable.com/docs/platform/support)
+- **Bugs and feature requests:** [open an issue](https://github.com/faablecloud/auth-js/issues)
+- **Security issues:** report them privately to [support@faable.com](mailto:support@faable.com),
+  not in a public issue
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE) © Faable Cloud SLU
