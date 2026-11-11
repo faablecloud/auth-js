@@ -106,7 +106,10 @@ describe('getClaims', () => {
   it('getClaim returns one claim, null when absent or signed out', async () => {
     mockSession(
       sessionWith(
-        jwtWith({ sub: 'user_1', 'example.com/station_id': 'station_123456789' })
+        jwtWith({
+          sub: 'user_1',
+          'example.com/station_id': 'station_123456789'
+        })
       )
     )
     expect(await client().getClaim<string>('example.com/station_id')).toBe(

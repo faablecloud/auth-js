@@ -12,14 +12,16 @@
 
 # @faable/auth-js
 
-An isomorphic JavaScript client for [Faable Auth](https://faable.com/docs/auth). Use it to sign
-users in from the browser, or from the server with the Next.js helpers.
+An isomorphic JavaScript client for [Faable Auth](https://faable.com/docs/auth).
+Use it to sign users in from the browser, or from the server with the Next.js
+helpers.
 
 📚 Guides: [faable.com/docs/auth](https://faable.com/docs/auth) · API reference:
 [faablecloud.github.io/auth-js](https://faablecloud.github.io/auth-js/)
 
-**Contents:** [Features](#features) · [Install](#install) · [Quick start](#quick-start) ·
-[Configuration](#configuration) · [Authentication flows](#authentication-flows) ·
+**Contents:** [Features](#features) · [Install](#install) ·
+[Quick start](#quick-start) · [Configuration](#configuration) ·
+[Authentication flows](#authentication-flows) ·
 [Error handling](#error-handling) · [Sessions](#sessions-and-state-changes) ·
 [Storage adapters](#storage-adapters) · [Next.js](#nextjs--server-side) ·
 [Support](#support) · [License](#license)
@@ -609,19 +611,22 @@ use it for convenience only, never as authorization. New apps use the
 ## Documentation
 
 - [Faable Auth guides](https://faable.com/docs/auth)
-- [Quickstarts](https://faable.com/docs/auth/quickstart) for React, Next.js, Vue, Nuxt, Angular,
-  SvelteKit and React Native
+- [Quickstarts](https://faable.com/docs/auth/quickstart) for React, Next.js,
+  Vue, Nuxt, Angular, SvelteKit and React Native
 - [API reference](https://faablecloud.github.io/auth-js/)
 
 ## Support
 
 - **Documentation:** [faable.com/docs](https://faable.com/docs)
-- **Community help, on every plan:** [GitHub Discussions](https://github.com/orgs/faablecloud/discussions)
-- **Help from the Faable team, on the Hobby and Pro plans:** [support@faable.com](mailto:support@faable.com).
-  See the [support page](https://faable.com/docs/platform/support)
-- **Bugs and feature requests:** [open an issue](https://github.com/faablecloud/auth-js/issues)
-- **Security issues:** report them privately to [support@faable.com](mailto:support@faable.com),
-  not in a public issue
+- **Community help, on every plan:**
+  [GitHub Discussions](https://github.com/orgs/faablecloud/discussions)
+- **Help from the Faable team, on the Hobby and Pro plans:**
+  [support@faable.com](mailto:support@faable.com). See the
+  [support page](https://faable.com/docs/platform/support)
+- **Bugs and feature requests:**
+  [open an issue](https://github.com/faablecloud/auth-js/issues)
+- **Security issues:** report them privately to
+  [support@faable.com](mailto:support@faable.com), not in a public issue
 
 ## License
 
