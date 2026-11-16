@@ -24,7 +24,7 @@ const hintKey = (storageKey: string) => `${storageKey}${SUFFIX}`
 const attrs = (options: SessionHintCookieOptions): CookieAttributes => ({
   path: '/',
   sameSite: 'Lax',
-  secure: hasBrowserJar() && window.location.protocol === 'https:',
+  secure: !!window && !!document && window.location.protocol === 'https:',
   maxAge: options.maxAge ?? DEFAULT_SESSION_HINT_MAX_AGE_SECONDS,
   ...(options.domain ? { domain: options.domain } : {})
 })
