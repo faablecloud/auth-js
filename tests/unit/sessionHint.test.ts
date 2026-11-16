@@ -146,6 +146,25 @@ describe('client with sessionHintCookie', () => {
     expect(hasSessionHint()).toBe(false)
   })
 
+  it('renews the hint when it loads a valid stored session', async () => {
+    const storage = memoryStorage()
+    const exp = Math.floor(Date.now() / 1000) + 3600
+    storage.setItem(
+      KEY,
+      JSON.stringify({
+        access_token: jwt(exp),
+        refresh_token: 'rt_1',
+        expires_at: exp,
+        expires_in: 3600,
+        token_type: 'bearer',
+        user: { sub: 'user_1' }
+      })
+    )
+    const auth = client(storage)
+    await auth.initialize()
+    expect(hasSessionHint({ clientId: CLIENT_ID })).toBe(true)
+  })
+
   it('writes nothing unless enabled', async () => {
     const auth = client(memoryStorage(), false)
     const exp = Math.floor(Date.now() / 1000) + 3600

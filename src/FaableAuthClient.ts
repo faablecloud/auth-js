@@ -1219,6 +1219,11 @@ export class FaableAuthClient extends Base {
         // local storage; persisting it again may overwrite a value saved by
         // another client with access to the same local storage
         this._session = currentSession
+        // The session hint, though, is renewed: it is what other subdomains
+        // read, and without this a session that has not needed a refresh yet
+        // (or a hint the browser expired, like Safari's 7-day cap on cookies
+        // set from script) would read as signed out until the next refresh.
+        this._writeSessionHint(true)
         await this._notifyAllSubscribers('SIGNED_IN', currentSession)
       }
     } catch (err) {
