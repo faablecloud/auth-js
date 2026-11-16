@@ -23,6 +23,10 @@
       "types": "./dist/dts/nextjs/index.d.ts",
       "default": "./dist/nextjs.js"
     },
+    "./session-hint": {
+      "types": "./dist/dts/entrypoints/session-hint.es.d.ts",
+      "default": "./dist/session-hint.js"
+    },
     "./package.json": "./package.json"
   },
   "sideEffects": false,

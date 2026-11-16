@@ -70,7 +70,7 @@ try {
 
     const mod = await import("@faable/auth-js");
 
-    const required = ["createClient", "FaableAuthClient", "AuthError"];
+    const required = ["createClient", "FaableAuthClient", "AuthError", "hasSessionHint"];
     const missing = required.filter((name) => typeof mod[name] === "undefined");
     if (missing.length) {
       console.error("Missing exports:", missing);
@@ -186,6 +186,16 @@ try {
       const [sa, sb] = [await authA.getSession(), await authB.getSession()];
       if (a.spy.removed || b.spy.removed || !sa.data.session || !sb.data.session) {
         console.error("Racing clients must not log each other out (removedA:", a.spy.removed, "removedB:", b.spy.removed, "sessionA:", !!sa.data.session, "sessionB:", !!sb.data.session, ")");
+        process.exit(1);
+      }
+    }
+    // \`@faable/auth-js/session-hint\` resolves on its own and reads the
+    // cookie a client writes — the subpath marketing pages import.
+    {
+      const hint = await import("@faable/auth-js/session-hint");
+      document.cookie = "faableauth-test-session-hint=1";
+      if (hint.hasSessionHint() !== true || hint.hasSessionHint({ clientId: "other" }) !== false) {
+        console.error("@faable/auth-js/session-hint does not read the hint cookie");
         process.exit(1);
       }
     }

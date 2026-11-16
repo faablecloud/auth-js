@@ -50,6 +50,7 @@ import {
 } from './lib/pending_passwordless'
 import { loadCodeVerifier } from './lib/pkce_storage'
 import { isValidSession } from './lib/session_helpers'
+import { clearSessionHint, saveSessionHint } from './lib/session_hint'
 import { cookieStorageAdapter } from './lib/storage/cookie-storage'
 import { localStorageAdapter } from './lib/storage/local-storage'
 import { getItemAsync, setItemAsync } from './lib/storage_helpers'
@@ -62,6 +63,7 @@ import {
   JwtClaims,
   LastUsedCookieOptions,
   OAuthResponse,
+  SessionHintCookieOptions,
   SignInWithOAuthConnection,
   SignupLoginOptions,
   SignupParams,
@@ -309,6 +311,7 @@ export class FaableAuthClient extends Base {
 
   /** Attribute overrides for the "last used login method" hint cookie. */
   protected lastUsedCookie?: LastUsedCookieOptions
+  protected sessionHintCookie?: SessionHintCookieOptions
 
   protected lock: Lock
 
@@ -390,6 +393,7 @@ export class FaableAuthClient extends Base {
     this.flowType = isBrowser() ? 'pkce' : (config.flowType ?? 'implicit')
 
     this.lastUsedCookie = config.lastUsedCookie
+    this.sessionHintCookie = config.sessionHintCookie
 
     this.autoRefreshToken = true
 
@@ -3443,6 +3447,7 @@ export class FaableAuthClient extends Base {
     this._debug('#_removeSession()')
     this._session = null
     await this.storage.removeItem(this.storageKey)
+    this._writeSessionHint(false)
   }
 
   protected async _setSession(currentSession: {
@@ -3515,6 +3520,23 @@ export class FaableAuthClient extends Base {
     this._session = session
 
     await setItemAsync(this.storage, this.storageKey, session)
+    this._writeSessionHint(true)
+  }
+
+  /**
+   * Keeps the `sessionHintCookie` (when enabled) in step with the session.
+   * Every save and every removal goes through here, so sign-in, refresh,
+   * sign-out and a rejected refresh token all move it. Best-effort: a cookie
+   * the browser refuses must never break the session write.
+   */
+  private _writeSessionHint(signedIn: boolean) {
+    if (!this.sessionHintCookie) return
+    try {
+      if (signedIn) saveSessionHint(this.storageKey, this.sessionHintCookie)
+      else clearSessionHint(this.storageKey, this.sessionHintCookie)
+    } catch (error) {
+      this._debug('#_writeSessionHint()', 'failed', error)
+    }
   }
 
   /**

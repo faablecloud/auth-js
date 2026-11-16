@@ -63,17 +63,18 @@ await auth.signInWithOauthConnection({ connection: 'google' })
 
 `createClient(config)` accepts:
 
-| Option          | Type               | Description                                                                                                                                              |
-| --------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `domain`        | `string`           | **Required.** Your Faable Auth tenant domain. The protocol is optional — `tenant.auth.faable.link` and `https://tenant.auth.faable.link` are equivalent. |
-| `clientId`      | `string`           | **Required.** Application client ID.                                                                                                                     |
-| `redirectUri`   | `string`           | Default callback URL. Falls back to `window.location.origin`.                                                                                            |
-| `scope`         | `string`           | Space-separated scopes. Defaults to `openid profile email`.                                                                                              |
-| `storage`       | `SupportedStorage` | Custom storage adapter. Defaults to `localStorage`.                                                                                                      |
-| `storageKey`    | `string`           | Prefix for the storage key. Final key is `${storageKey}-${clientId}`.                                                                                    |
-| `cookieOptions` | `CookieOptions`    | When set, switches storage to the cookie adapter.                                                                                                        |
-| `lock`          | `LockFunc`         | Custom locking primitive for concurrent refreshes.                                                                                                       |
-| `debug`         | `boolean`          | Enables verbose logging.                                                                                                                                 |
+| Option              | Type                       | Description                                                                                                                                              |
+| ------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `domain`            | `string`                   | **Required.** Your Faable Auth tenant domain. The protocol is optional — `tenant.auth.faable.link` and `https://tenant.auth.faable.link` are equivalent. |
+| `clientId`          | `string`                   | **Required.** Application client ID.                                                                                                                     |
+| `redirectUri`       | `string`                   | Default callback URL. Falls back to `window.location.origin`.                                                                                            |
+| `scope`             | `string`                   | Space-separated scopes. Defaults to `openid profile email`.                                                                                              |
+| `storage`           | `SupportedStorage`         | Custom storage adapter. Defaults to `localStorage`.                                                                                                      |
+| `storageKey`        | `string`                   | Prefix for the storage key. Final key is `${storageKey}-${clientId}`.                                                                                    |
+| `cookieOptions`     | `CookieOptions`            | When set, switches storage to the cookie adapter.                                                                                                        |
+| `sessionHintCookie` | `SessionHintCookieOptions` | Writes a cookie that says "signed in" so other subdomains can tell — see [Signed in on another subdomain](#signed-in-on-another-subdomain).              |
+| `lock`              | `LockFunc`                 | Custom locking primitive for concurrent refreshes.                                                                                                       |
+| `debug`             | `boolean`                  | Enables verbose logging.                                                                                                                                 |
 
 ## Authentication flows
 
@@ -430,6 +431,37 @@ token without verifying it: fine for showing UI, but your API must check the
 token itself (`verifyAccessToken` and `requirePermissions` in
 `@faable/auth-sdk`). The pure helpers `permissionsOf`, `hasPermissions` and
 `hasRoles` work on any decoded claims.
+
+### Signed in on another subdomain
+
+Your marketing site on `example.com` can show "Go to app" instead of "Sign up"
+to someone signed in to `app.example.com`. Turn on the hint in the app:
+
+```ts
+const auth = createClient({
+  domain: 'tenant.auth.faable.link',
+  clientId: 'your-client-id',
+  sessionHintCookie: { domain: '.example.com' }
+})
+```
+
+The client then keeps a `faableauth-<clientId>-session-hint=1` cookie while it
+holds a session — renewed on every sign-in and token refresh, removed on
+sign-out or when the session is lost. On the site, read it with the standalone
+subpath (about 2 KB, no client attached):
+
+```ts
+import { hasSessionHint } from '@faable/auth-js/session-hint'
+
+const signedIn = hasSessionHint() // or hasSessionHint({ clientId })
+```
+
+It is a hint, not proof: it carries no token and no personal data, and it can
+outlive a session that expired without the app noticing by up to its max-age (30
+days by default, `sessionHintCookie.maxAge` to change it). Never use it to
+authorize anything. It works in every browser because it is a plain cookie —
+unlike reading the app's `localStorage` from a hidden iframe, which Safari
+partitions.
 
 ## Storage adapters
 

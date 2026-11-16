@@ -411,6 +411,20 @@ export interface LastUsedCookieOptions {
 }
 
 /**
+ * Attribute overrides for the session hint cookie (see `hasSessionHint`).
+ */
+export interface SessionHintCookieOptions {
+  /**
+   * (Optional) Cookie domain. Use a leading dot to make the hint visible to
+   * your other subdomains, e.g. `.example.com` so `example.com` can tell that
+   * the visitor is signed in to `app.example.com`.
+   */
+  domain?: string
+  /** (Optional) Cookie lifetime in seconds. Defaults to 30 days. */
+  maxAge?: number
+}
+
+/**
  * Configuration accepted by {@link createClient} and the
  * `FaableAuthClient` constructor.
  *
@@ -470,6 +484,15 @@ export type FaableAuthClientConfig = {
    * subdomains. Does not affect where the session itself is stored.
    */
   lastUsedCookie?: LastUsedCookieOptions
+
+  /**
+   * (Optional) Turns on the session hint cookie: `1` while this client holds a
+   * session, removed when it loses it. Pass `{ domain: '.example.com' }` so
+   * your other subdomains can read it with `hasSessionHint()` — e.g. to show
+   * "Go to app" on the marketing site. Off by default. Does not affect where
+   * the session itself is stored.
+   */
+  sessionHintCookie?: SessionHintCookieOptions
 
   /**
    * Provide your own locking mechanism based on the environment. By default no locking is done at this time.

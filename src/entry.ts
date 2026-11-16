@@ -20,6 +20,7 @@ import type {
   LastUsedLoginMethodKind
 } from './lib/last_used_storage'
 import type { PendingPasswordless } from './lib/pending_passwordless'
+import { hasSessionHint } from './lib/session_hint'
 import { Session, User } from './lib/types'
 import type {
   AuthChangeEvent,
@@ -35,6 +36,7 @@ import type {
   ProfileField,
   ProfileUpdate,
   Provider,
+  SessionHintCookieOptions,
   SignInWithOAuthConnection,
   SignOut,
   SignupLoginOptions,
@@ -66,7 +68,8 @@ export {
   unwrap,
   permissionsOf,
   hasPermissions,
-  hasRoles
+  hasRoles,
+  hasSessionHint
 }
 
 export type {
@@ -81,6 +84,7 @@ export type {
   SupportedStorage,
   CookieOptions,
   LastUsedCookieOptions,
+  SessionHintCookieOptions,
   LastUsedLoginMethod,
   LastUsedLoginMethodKind,
   OAuthResponse,
