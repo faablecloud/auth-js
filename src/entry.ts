@@ -7,7 +7,10 @@ import type { RedirectError, SignOutReason } from './FaableAuthClient'
 import { createClient } from './createClient'
 import { solveChallenge } from './lib/challenge'
 import type { ChallengeDetails, ChallengeState } from './lib/challenge'
-import { mountChallengeWidget } from './lib/challenge_widget'
+import {
+  mountChallengeWidget,
+  resetChallengeWidgets
+} from './lib/challenge_widget'
 import type { ChallengeWidgetOptions } from './lib/challenge_widget'
 import { hasPermissions, hasRoles, permissionsOf } from './lib/claims'
 import {
@@ -75,7 +78,8 @@ export {
   hasRoles,
   hasSessionHint,
   solveChallenge,
-  mountChallengeWidget
+  mountChallengeWidget,
+  resetChallengeWidgets
 }
 
 export type {
