@@ -20,6 +20,7 @@ import {
   isAuthRetryableFetchError
 } from './lib/errors'
 import { _get, _post } from './lib/fetch'
+import { FormTransactions, takeTransaction } from './lib/form_transaction'
 import { document, fetch, window } from './lib/globals'
 import {
   Deferred,
@@ -286,6 +287,11 @@ export class FaableAuthClient extends Base {
   protected storageKey: string
 
   protected clientId: string
+  /**
+   * Form transaction tokens for signup and passwordless (lib/form_transaction).
+   * @hidden
+   */
+  readonly _formTransactions: FormTransactions
   protected storage: SupportedStorage
   protected api: FaableAuthApi
 
@@ -367,6 +373,11 @@ export class FaableAuthClient extends Base {
       throw new Error('Missing clientId')
     }
     this.clientId = config.clientId
+    this._formTransactions = new FormTransactions(
+      this.domainUrl,
+      this.clientId,
+      (...args) => this._debug(...args)
+    )
     this.audience = config.audience
 
     this.api = new FaableAuthApi(this.domainUrl, { debug })
@@ -1805,8 +1816,11 @@ export class FaableAuthClient extends Base {
       status,
       code
     } = await postWithChallenge(
-      challenge =>
-        _post<SignupResult>(`${this.domainUrl}/dbconnections/signup`, {
+      // A fresh tx per attempt: the server consumes it on first use, so the
+      // retry after a challenge cannot reuse the first one.
+      async challenge => {
+        const tx = await takeTransaction(this._formTransactions)
+        return _post<SignupResult>(`${this.domainUrl}/dbconnections/signup`, {
           client_id: this.clientId,
           ...(data.email ? { email: data.email } : {}),
           ...(data.username ? { username: data.username } : {}),
@@ -1816,8 +1830,10 @@ export class FaableAuthClient extends Base {
           ...(data.family_name ? { family_name: data.family_name } : {}),
           ...(data.user_metadata ? { user_metadata: data.user_metadata } : {}),
           ...(data.connection ? { connection: data.connection } : {}),
-          ...(challenge ? { challenge } : {})
-        }),
+          ...(challenge ? { challenge } : {}),
+          ...(tx ? { tx } : {})
+        })
+      },
       data.onChallenge
     )
 
@@ -2163,16 +2179,20 @@ export class FaableAuthClient extends Base {
   }): Promise<AuthResult<any>> {
     const audience = data.audience ?? this.audience
     const response = await postWithChallenge(
-      challenge =>
-        _post(`${this.domainUrl}/passwordless/start`, {
+      // A fresh tx per attempt, as in signup().
+      async challenge => {
+        const tx = await takeTransaction(this._formTransactions)
+        return _post(`${this.domainUrl}/passwordless/start`, {
           client_id: this.clientId,
           email: data.email,
           send: data.type,
           ...(audience ? { audience } : {}),
           ...(data.authParams ? { auth_params: data.authParams } : {}),
           ...(data.resumeUrl ? { resume_url: data.resumeUrl } : {}),
-          ...(challenge ? { challenge } : {})
-        }),
+          ...(challenge ? { challenge } : {}),
+          ...(tx ? { tx } : {})
+        })
+      },
       data.onChallenge
     )
 
