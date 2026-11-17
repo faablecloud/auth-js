@@ -1,6 +1,6 @@
 import { FaableAuthClient } from './FaableAuthClient'
 import { watchChallengeWidgets } from './lib/challenge_widget'
-import { prefetchTransaction } from './lib/form_transaction'
+import { armTransaction } from './lib/form_transaction'
 import { FaableAuthClientConfig } from './lib/types'
 
 /**
@@ -30,9 +30,10 @@ export const createClient = (config: FaableAuthClientConfig) => {
   // `[data-faable-challenge]` element (lib/challenge_widget.ts).
   watchChallengeWidgets()
   const client = new FaableAuthClient(config)
-  // The form transaction token for signup and passwordless, fetched now so it
-  // is ready (and more than a second old) when the form is sent. Browser only;
-  // a no-op in SSR and Node (lib/form_transaction.ts).
-  prefetchTransaction(client._formTransactions)
+  // The form transaction token for signup and passwordless: fetched once a
+  // form is in play (first focus inside a <form>, or a challenge widget), not
+  // on every page load. Browser only; a no-op in SSR and Node
+  // (lib/form_transaction.ts).
+  armTransaction(client._formTransactions)
   return client
 }

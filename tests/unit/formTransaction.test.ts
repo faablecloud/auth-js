@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createClient } from '../../src/createClient'
+import { mountChallengeWidget } from '../../src/lib/challenge_widget'
 import { _get, _post } from '../../src/lib/fetch'
 import {
   FormTransactions,
   TX_MIN_AGE_MS,
   TX_SAFETY_MARGIN_MS,
+  __resetFormInPlay,
   takeTransaction
 } from '../../src/lib/form_transaction'
 import type { SupportedStorage } from '../../src/lib/types'
@@ -61,6 +63,7 @@ const flush = async () => {
 }
 
 beforeEach(() => {
+  __resetFormInPlay()
   n = 0
   mGet.mockReset()
   mPost.mockReset()
@@ -74,15 +77,111 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/**
+ * A document that records its focusin listeners and can play a focus on an
+ * element: `field('input', true)` is an input inside a <form>.
+ */
+const fakeDocument = () => {
+  const listeners = new Set<(ev: Event) => void>()
+  return {
+    listeners,
+    addEventListener: (
+      type: string,
+      fn: (ev: Event) => void,
+      capture?: boolean
+    ) => {
+      if (type === 'focusin' && capture) listeners.add(fn)
+    },
+    removeEventListener: (type: string, fn: (ev: Event) => void) => {
+      if (type === 'focusin') listeners.delete(fn)
+    },
+    focus: (tag: string, inForm: boolean) => {
+      const target = {
+        matches: (sel: string) => sel.split(/,\s*/).includes(tag),
+        closest: (sel: string) => (sel === 'form' && inForm ? {} : null)
+      }
+      Array.from(listeners).forEach(fn => fn({ target } as unknown as Event))
+    }
+  }
+}
+
+const browser = () => {
+  const doc = fakeDocument()
+  vi.stubGlobal('window', {})
+  vi.stubGlobal('document', doc)
+  return doc
+}
+
 describe('form transaction: prefetch', () => {
-  it('createClient prefetches one in a browser', async () => {
-    vi.stubGlobal('window', {})
+  it('createClient does not fetch one on page load', async () => {
+    const doc = browser()
     client()
-    await vi.waitFor(() => expect(txCalls()).toHaveLength(1))
+    await flush()
+    expect(txCalls()).toHaveLength(0)
+    expect(doc.listeners.size).toBe(1)
   })
 
-  it('does not prefetch in Node / SSR', async () => {
+  it('fetches one on the first focus on a field inside a <form>, once', async () => {
+    const doc = browser()
+    const ft = new FormTransactions(DOMAIN, 'test-client')
+    ft.arm()
+    ft.arm()
+    expect(doc.listeners.size).toBe(1)
+    doc.focus('div', true)
+    doc.focus('input', false)
+    await flush()
+    expect(txCalls()).toHaveLength(0)
+    doc.focus('textarea', true)
+    await flush()
+    expect(txCalls()).toHaveLength(1)
+    expect(doc.listeners.size).toBe(0)
+    doc.focus('input', true)
+    await flush()
+    expect(txCalls()).toHaveLength(1)
+  })
+
+  it('one listener per client', () => {
+    const doc = browser()
+    new FormTransactions(DOMAIN, 'a').arm()
+    new FormTransactions(DOMAIN, 'b').arm()
+    expect(doc.listeners.size).toBe(2)
+  })
+
+  it('a challenge widget mounting fetches one for every armed client', async () => {
+    const doc = browser()
+    const ft = new FormTransactions(DOMAIN, 'test-client')
+    ft.arm()
+    // The hook runs before any rendering: a bare element is enough.
+    const el = {
+      attachShadow: () => {
+        throw new Error('no DOM here')
+      }
+    } as unknown as Element
+    expect(() => mountChallengeWidget(el)).toThrow('no DOM here')
+    await flush()
+    expect(txCalls()).toHaveLength(1)
+    expect(doc.listeners.size).toBe(0)
+  })
+
+  it('a client created after a widget mounted fetches one at once', async () => {
+    browser()
+    expect(() =>
+      mountChallengeWidget({
+        attachShadow: () => {
+          throw new Error('no DOM here')
+        }
+      } as unknown as Element)
+    ).toThrow()
+    new FormTransactions(DOMAIN, 'test-client').arm()
+    await flush()
+    expect(txCalls()).toHaveLength(1)
+  })
+
+  it('nothing in Node / SSR', async () => {
     expect(typeof window).toBe('undefined')
+    const ft = new FormTransactions(DOMAIN, 'test-client')
+    ft.arm()
+    ft.prefetch()
     client()
     await flush()
     expect(txCalls()).toHaveLength(0)

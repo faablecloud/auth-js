@@ -11,9 +11,12 @@
  * The contract is the server's (auth `/login/transaction`): change one, change
  * both.
  *
- * In a browser the client fetches one in the background as soon as it is
- * created, so by the time someone has typed an email it is ready. Each request
- * takes the cached one (single use) and the next is prefetched right away.
+ * In a browser the client fetches one in the background once a form is in
+ * play — the first focus on a field inside a `<form>`, or a challenge widget
+ * mounting — so by the time someone has typed an email it is ready, and a page
+ * that never shows a form (a logged-in dashboard) never asks for one. Each
+ * request takes the cached one (single use) and the next is prefetched right
+ * away.
  * Without a cached one — SSR, Node, a prefetch that failed — the request waits
  * for a fresh one, briefly and best effort: a server that does not know
  * `/login/transaction` yet (404) or does not answer in time just means the
@@ -46,6 +49,29 @@ type Cached = { tx: string; receivedAt: number; expiresAt: number }
 
 const inBrowser = () => typeof window !== 'undefined'
 
+/** Clients waiting for a form to be in play (see {@link armTransaction}). */
+const ARMED = new Set<FormTransactions>()
+/** A widget already mounted: clients armed after it prefetch at once. */
+let formSeen = false
+
+const FIELD = 'input, textarea, select'
+
+/**
+ * A form is in play: every armed client prefetches its tx. Called when a
+ * challenge widget mounts (lib/challenge_widget.ts). Browser only.
+ */
+export const formInPlay = (): void => {
+  if (!inBrowser()) return
+  formSeen = true
+  Array.from(ARMED).forEach(ft => ft.prefetch())
+}
+
+/** Forgets armed clients and any widget seen. For the tests. @hidden */
+export const __resetFormInPlay = (): void => {
+  ARMED.clear()
+  formSeen = false
+}
+
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 /**
@@ -73,6 +99,8 @@ export class FormTransactions {
   private inflight?: Promise<void>
   private timer?: ReturnType<typeof setTimeout>
   private idleRefreshes = 0
+  private armed = false
+  private onFocusIn?: (ev: Event) => void
 
   constructor(
     private readonly domainUrl: string,
@@ -80,9 +108,33 @@ export class FormTransactions {
     private readonly debug: (...args: unknown[]) => void = () => {}
   ) {}
 
+  /**
+   * Waits for a form to be in play to prefetch: the first `focusin` on a field
+   * inside a `<form>` (one capture listener on `document`, removed once it
+   * fires) or a challenge widget mounting. Browser only; once per client.
+   */
+  arm(): void {
+    if (!inBrowser() || this.armed) return
+    this.armed = true
+    ARMED.add(this)
+    if (formSeen) {
+      this.prefetch()
+      return
+    }
+    const doc = typeof document !== 'undefined' ? document : undefined
+    if (!doc?.addEventListener) return
+    this.onFocusIn = (ev: Event) => {
+      const t = ev.target as Element | null
+      if (!t?.matches?.(FIELD) || !t.closest?.('form')) return
+      this.prefetch()
+    }
+    doc.addEventListener('focusin', this.onFocusIn, true)
+  }
+
   /** Starts fetching one in the background, in a browser only. Never throws. */
   prefetch(): void {
     if (!inBrowser()) return
+    this.disarm()
     if (this.usable(this.cached)) return
     void this.refill()
   }
@@ -112,6 +164,14 @@ export class FormTransactions {
     const age = Date.now() - c.receivedAt
     if (age < TX_MIN_AGE_MS) await sleep(TX_MIN_AGE_MS - age)
     return c.tx
+  }
+
+  private disarm() {
+    ARMED.delete(this)
+    if (this.onFocusIn && typeof document !== 'undefined') {
+      document.removeEventListener('focusin', this.onFocusIn, true)
+    }
+    this.onFocusIn = undefined
   }
 
   private usable(c?: Cached): c is Cached {
@@ -190,6 +250,9 @@ export class FormTransactions {
     }
   }
 }
+
+/** See {@link FormTransactions.arm}. */
+export const armTransaction = (ft: FormTransactions): void => ft.arm()
 
 /** See {@link FormTransactions.prefetch}. */
 export const prefetchTransaction = (ft: FormTransactions): void => ft.prefetch()

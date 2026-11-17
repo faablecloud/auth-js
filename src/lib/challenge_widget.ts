@@ -1,6 +1,7 @@
 import { CHALLENGE_EVENT, ChallengeState } from './challenge'
 import { CHALLENGE_TEXTS, ChallengeTexts } from './challenge_i18n'
 import { FAABLE_MARK_PNG } from './challenge_logo'
+import { formInPlay } from './form_transaction'
 
 /**
  * The optional, visible face of the bot-protection challenge: a tag (pill)
@@ -381,6 +382,8 @@ export const mountChallengeWidget = (
 ): ChallengeWidget => {
   const existing = MOUNTED.get(el)
   if (existing) return existing
+  // A widget means a form: the clients fetch their form transaction now.
+  formInPlay()
   const root = el.shadowRoot ?? el.attachShadow({ mode: 'open' })
   let state: WidgetState = 'idle'
   const options = (): Required<ChallengeWidgetOptions> => ({
