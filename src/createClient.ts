@@ -1,4 +1,5 @@
 import { FaableAuthClient } from './FaableAuthClient'
+import { watchChallengeWidgets } from './lib/challenge_widget'
 import { FaableAuthClientConfig } from './lib/types'
 
 /**
@@ -24,5 +25,8 @@ import { FaableAuthClientConfig } from './lib/types'
  * @category Getting started
  */
 export const createClient = (config: FaableAuthClientConfig) => {
+  // The optional bot-protection badge: draws itself in any
+  // `[data-faable-challenge]` element (lib/challenge_widget.ts).
+  watchChallengeWidgets()
   return new FaableAuthClient(config)
 }

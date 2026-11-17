@@ -714,6 +714,12 @@ export type SignupParams = {
   user_metadata?: Record<string, unknown>
   /** Database connection name, when the tenant has more than one. */
   connection?: string
+  /**
+   * Called while a bot-protection challenge is solved, when the application's
+   * signup protection asks for one (`'solving'` → `'done'` | `'error'`).
+   * The library solves it and retries by itself; this is only for the UI.
+   */
+  onChallenge?: (state: 'solving' | 'done' | 'error') => void
 }
 
 /** Where the login that follows a signup lands. */

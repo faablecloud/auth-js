@@ -2,6 +2,7 @@ import { Base } from './Base'
 import FaableAuthApi from './FaableAuthApi'
 import { buildAndSubmitForm, resolveResponseType } from './lib/auth_helpers'
 import { BroadcastSync } from './lib/broadcast_sync'
+import { postWithChallenge } from './lib/challenge'
 import { hasPermissions, hasRoles } from './lib/claims'
 import { EXPIRY_MARGIN, STORAGE_KEY } from './lib/constants'
 import {
@@ -1803,26 +1804,34 @@ export class FaableAuthClient extends Base {
       error,
       status,
       code
-    } = await _post<SignupResult>(`${this.domainUrl}/dbconnections/signup`, {
-      client_id: this.clientId,
-      ...(data.email ? { email: data.email } : {}),
-      ...(data.username ? { username: data.username } : {}),
-      ...(data.password !== undefined ? { password: data.password } : {}),
-      ...(data.name ? { name: data.name } : {}),
-      ...(data.given_name ? { given_name: data.given_name } : {}),
-      ...(data.family_name ? { family_name: data.family_name } : {}),
-      ...(data.user_metadata ? { user_metadata: data.user_metadata } : {}),
-      ...(data.connection ? { connection: data.connection } : {})
-    })
+    } = await postWithChallenge(
+      challenge =>
+        _post<SignupResult>(`${this.domainUrl}/dbconnections/signup`, {
+          client_id: this.clientId,
+          ...(data.email ? { email: data.email } : {}),
+          ...(data.username ? { username: data.username } : {}),
+          ...(data.password !== undefined ? { password: data.password } : {}),
+          ...(data.name ? { name: data.name } : {}),
+          ...(data.given_name ? { given_name: data.given_name } : {}),
+          ...(data.family_name ? { family_name: data.family_name } : {}),
+          ...(data.user_metadata ? { user_metadata: data.user_metadata } : {}),
+          ...(data.connection ? { connection: data.connection } : {}),
+          ...(challenge ? { challenge } : {})
+        }),
+      data.onChallenge
+    )
 
     if (error) {
       // `_post` hands back the server's `{ status, message }` body as `data`
       // and its `message` as `error`. Map the HTTP status to a stable
       // ErrorCode so callers can branch without string-matching the message.
       const httpStatus = status ?? ((body as any)?.status as number | undefined)
+      // 403 and 428 carry the server's own code (signup_denied,
+      // challenge_unsupported, origin_required…). Until 3.4 every 403 was
+      // reported as `signup_disabled`.
       const errorCode =
-        httpStatus === 403
-          ? 'signup_disabled'
+        httpStatus === 403 || httpStatus === 428
+          ? (code ?? 'signup_disabled')
           : httpStatus === 409
             ? code === 'username_taken'
               ? 'username_exists'
@@ -2149,16 +2158,23 @@ export class FaableAuthClient extends Base {
     authParams?: Record<string, string>
     resumeUrl?: string
     appState?: unknown
+    /** See {@link SignupParams.onChallenge}. */
+    onChallenge?: (state: 'solving' | 'done' | 'error') => void
   }): Promise<AuthResult<any>> {
     const audience = data.audience ?? this.audience
-    const response = await _post(`${this.domainUrl}/passwordless/start`, {
-      client_id: this.clientId,
-      email: data.email,
-      send: data.type,
-      ...(audience ? { audience } : {}),
-      ...(data.authParams ? { auth_params: data.authParams } : {}),
-      ...(data.resumeUrl ? { resume_url: data.resumeUrl } : {})
-    })
+    const response = await postWithChallenge(
+      challenge =>
+        _post(`${this.domainUrl}/passwordless/start`, {
+          client_id: this.clientId,
+          email: data.email,
+          send: data.type,
+          ...(audience ? { audience } : {}),
+          ...(data.authParams ? { auth_params: data.authParams } : {}),
+          ...(data.resumeUrl ? { resume_url: data.resumeUrl } : {}),
+          ...(challenge ? { challenge } : {})
+        }),
+      data.onChallenge
+    )
 
     if (!response.error && data.type === 'code') {
       await this.resumePasswordless({
@@ -2168,7 +2184,20 @@ export class FaableAuthClient extends Base {
       })
     }
 
-    return { data: response.data, error: response.error }
+    if (response.error) {
+      // The server's code travels with the error (challenge_unsupported,
+      // origin_required, signup_denied…): before 3.4 this returned the bare
+      // message string and every caller lost it.
+      return {
+        data: null,
+        error: new AuthApiError(
+          String(response.error),
+          response.status ?? 500,
+          response.code
+        )
+      }
+    }
+    return { data: response.data, error: null }
   }
 
   /**

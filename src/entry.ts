@@ -5,6 +5,10 @@ import {
 } from './FaableAuthClient'
 import type { RedirectError, SignOutReason } from './FaableAuthClient'
 import { createClient } from './createClient'
+import { solveChallenge } from './lib/challenge'
+import type { ChallengeDetails, ChallengeState } from './lib/challenge'
+import { mountChallengeWidget } from './lib/challenge_widget'
+import type { ChallengeWidgetOptions } from './lib/challenge_widget'
 import { hasPermissions, hasRoles, permissionsOf } from './lib/claims'
 import {
   AuthApiError,
@@ -69,10 +73,15 @@ export {
   permissionsOf,
   hasPermissions,
   hasRoles,
-  hasSessionHint
+  hasSessionHint,
+  solveChallenge,
+  mountChallengeWidget
 }
 
 export type {
+  ChallengeDetails,
+  ChallengeState,
+  ChallengeWidgetOptions,
   FaableAuthClientConfig,
   SignInWithOAuthConnection,
   AuthResponse,
