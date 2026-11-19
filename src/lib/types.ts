@@ -199,12 +199,11 @@ export interface AuthorizationParams {
   acr_values?: string
 
   /**
-   * The default scope to be used on authentication requests.
+   * The scope to request, space-separated.
    *
-   * This defaults to `profile email` if not set. If you are setting extra scopes and require
-   * `profile` and `email` to be included then you must include them in the provided scope.
-   *
-   * Note: The `openid` scope is **always applied** regardless of this setting.
+   * It replaces the default (`openid profile email`) instead of adding to it:
+   * include `openid`, `profile` and `email` yourself when you still want them
+   * alongside extra scopes such as an Api's permissions.
    */
   scope?: string
 
@@ -441,7 +440,15 @@ export type FaableAuthClientConfig = {
   clientId: string
 
   // Optional
-  /** Space-separated scopes. Defaults to `openid profile email`. */
+  /**
+   * Default space-separated scope of the authorize requests this client
+   * starts (`signIn`, `signInWithOauthConnection`, `buildAuthorizeUrl`,
+   * `getTokenSilently`…); a `scopes`/`scope` passed to a call overrides it.
+   * Unset, they ask for `openid profile email` (`buildAuthorizeUrl` sends
+   * none and leaves it to the server). It replaces that default rather than
+   * extending it, so include `openid profile email` along with extra scopes —
+   * e.g. the permissions of an RBAC Api set as `audience`.
+   */
   scope?: string
   /**
    * Default API audience the access tokens issued for this client should be

@@ -379,6 +379,11 @@ export class FaableAuthClient extends Base {
       (...args) => this._debug(...args)
     )
     this.audience = config.audience
+    // The default scope of every authorize this client starts. Never assigned
+    // up to 3.8.0: an SPA asking for an RBAC Api's permissions got a token
+    // with an empty `permissions` claim (Auth grants requested ∩ catalog ∩
+    // role grants), and nothing said why.
+    this.scope = config.scope
 
     this.api = new FaableAuthApi(this.domainUrl, { debug })
 
@@ -2741,7 +2746,7 @@ export class FaableAuthClient extends Base {
         options.redirectTo || this.redirectUri || window?.location.origin,
       response_type: resolveResponseType(options, isBrowser()),
       audience: options.audience ?? this.audience,
-      scope: options.scope,
+      scope: options.scope || this.scope,
       connection: options.connection,
       // Space-delimited, per OIDC Core §3.1.2.1.
       acr_values: Array.isArray(options.acr_values)
