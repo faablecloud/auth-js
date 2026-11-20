@@ -91,6 +91,15 @@ export type ProfileUpdate = {
   company_name?: string
   /** ISO 3166 code, alpha-2 or alpha-3 (`ES`, `ESP`); stored as alpha-2. */
   country_iso?: string
+  /**
+   * The user's phone, `null` to remove it. Normalised to E.164 with the
+   * tenant's default country (`636 123 456` → `+34636123456`); one that does
+   * not normalise fails with `invalid_phone`. A verified phone cannot be
+   * changed or removed this way: a different number fails with
+   * `phone_verified` (409) and nothing is written. Sending the same number is
+   * not an error.
+   */
+  phone?: string | null
   /** Custom fields the application declares (`profile_fields`), at most 20. */
   fields?: ProfileField[]
 }

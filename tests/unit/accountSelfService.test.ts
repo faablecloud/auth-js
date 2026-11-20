@@ -240,6 +240,52 @@ describe('updateProfile — name, company and country', () => {
     })
   })
 
+  it('sends phone, and null to remove it', async () => {
+    net.impl = reply(200, { id: 'user_1', phone: '+34636123456' })
+    const { data, error } = await client(storageWithSession()).updateProfile({
+      phone: '636123456'
+    })
+    expect(error).toBeNull()
+    expect(data?.phone).toBe('+34636123456')
+    expect(
+      JSON.parse(net.calls.find(c => c.url.endsWith('/me'))?.init.body)
+    ).toEqual({ phone: '636123456' })
+
+    net.calls.length = 0
+    net.impl = reply(200, { id: 'user_1', phone: null })
+    const removed = await client(storageWithSession()).updateProfile({
+      phone: null
+    })
+    expect(removed.error).toBeNull()
+    expect(
+      JSON.parse(net.calls.find(c => c.url.endsWith('/me'))?.init.body)
+    ).toEqual({ phone: null })
+  })
+
+  it('surfaces phone_verified and invalid_phone', async () => {
+    net.impl = reply(409, {
+      error_code: 'phone_verified',
+      message:
+        'This phone is verified. Change it with POST /user/:id/verify-phone/start.'
+    })
+    const verified = await client(storageWithSession()).updateProfile({
+      phone: '+34699000111'
+    })
+    expect(verified.data).toBeNull()
+    expect(verified.error?.code).toBe('phone_verified')
+    expect(verified.error?.status).toBe(409)
+
+    net.impl = reply(400, {
+      error_code: 'invalid_phone',
+      message: 'Invalid phone number.'
+    })
+    const invalid = await client(storageWithSession()).updateProfile({
+      phone: '12'
+    })
+    expect(invalid.error?.code).toBe('invalid_phone')
+    expect(invalid.error?.status).toBe(400)
+  })
+
   it('an empty update is refused before any request', async () => {
     const { error } = await client(storageWithSession()).updateProfile({})
     expect(error).not.toBeNull()

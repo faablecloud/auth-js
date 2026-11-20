@@ -86,6 +86,10 @@ export type ErrorCode =
   | 'too_many_login_attempts'
   | 'no_database_connection'
   | 'invalid_profile_field'
+  // `updateProfile({ phone })`: the number does not normalise (400), or the
+  // current phone is verified and only `verify-phone/start` can change it (409).
+  | 'invalid_phone'
+  | 'phone_verified'
 
 export class AuthError extends Error {
   /**

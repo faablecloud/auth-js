@@ -2465,10 +2465,19 @@ export class FaableAuthClient extends Base {
 
   /**
    * Updates the signed-in user's own profile: `name`, `company_name`,
-   * `country_iso` and the custom `fields`. Keys left out are not touched.
+   * `country_iso`, `phone` and the custom `fields`. Keys left out are not
+   * touched.
    *
    * - `country_iso` takes an ISO 3166 code (`ES` or `ESP`) and is stored as
    *   alpha-2; an unknown code fails with `bad_request`.
+   * - `phone` is the user's top-level phone (`null` removes it), normalised to
+   *   E.164 with the tenant's default country; one that does not normalise
+   *   fails with `invalid_phone` and nothing is written. Once the phone is
+   *   verified it is a recovery channel, so a different number (or `null`)
+   *   fails with `phone_verified` (status 409) and nothing changes: it is
+   *   changed through `POST /user/:id/verify-phone/start`, which proves the
+   *   new number by SMS. The same number, in any format, is not an error. Changing an unverified phone keeps
+   *   `phone_verified: false`.
    * - `fields` are stored in `user_metadata["faable.com/fields"]`. Only the
    *   keys the application declares (`profile_fields` on the client, else on
    *   the tenant) are accepted; any other key, or a value that does not match
@@ -2488,6 +2497,11 @@ export class FaableAuthClient extends Base {
    *   country_iso: 'GB',
    *   fields: [{ key: 'profile', value: 'teacher' }]
    * })
+   *
+   * const { error: phone_error } = await auth.updateProfile({ phone: '636123456' })
+   * if (phone_error?.code === 'phone_verified') {
+   *   // A verified phone: changing it needs an SMS code.
+   * }
    * ```
    * @see {@link https://faable.com/docs/auth/self-service-account | Self-service account}
    * @category Account
@@ -2499,12 +2513,13 @@ export class FaableAuthClient extends Base {
       profile.company_name = params.company_name
     if (params?.country_iso !== undefined)
       profile.country_iso = params.country_iso
+    if (params?.phone !== undefined) profile.phone = params.phone
     if (params?.fields?.length) profile.fields = params.fields
     if (Object.keys(profile).length === 0) {
       return {
         data: null,
         error: new AuthUnknownError(
-          'name, company_name, country_iso or fields is required',
+          'name, company_name, country_iso, phone or fields is required',
           null
         )
       }
