@@ -96,8 +96,8 @@ export type ProfileUpdate = {
    * tenant's default country (`636 123 456` → `+34636123456`); one that does
    * not normalise fails with `invalid_phone`. A verified phone cannot be
    * changed or removed this way: a different number fails with
-   * `phone_verified` (409) and nothing is written. Sending the same number is
-   * not an error.
+   * `phone_change_requires_verification` (409) and nothing is written: verify
+   * the new number by SMS instead. Sending the same number is not an error.
    */
   phone?: string | null
   /** Custom fields the application declares (`profile_fields`), at most 20. */

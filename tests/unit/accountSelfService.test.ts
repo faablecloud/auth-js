@@ -262,17 +262,17 @@ describe('updateProfile — name, company and country', () => {
     ).toEqual({ phone: null })
   })
 
-  it('surfaces phone_verified and invalid_phone', async () => {
+  it('surfaces phone_change_requires_verification and invalid_phone', async () => {
     net.impl = reply(409, {
-      error_code: 'phone_verified',
+      error_code: 'phone_change_requires_verification',
       message:
-        'This phone is verified. Change it with POST /user/:id/verify-phone/start.'
+        'This phone is verified. To change it, verify the new number with POST /user/:id/verify-phone/start.'
     })
     const verified = await client(storageWithSession()).updateProfile({
       phone: '+34699000111'
     })
     expect(verified.data).toBeNull()
-    expect(verified.error?.code).toBe('phone_verified')
+    expect(verified.error?.code).toBe('phone_change_requires_verification')
     expect(verified.error?.status).toBe(409)
 
     net.impl = reply(400, {

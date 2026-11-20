@@ -2474,10 +2474,12 @@ export class FaableAuthClient extends Base {
    *   E.164 with the tenant's default country; one that does not normalise
    *   fails with `invalid_phone` and nothing is written. Once the phone is
    *   verified it is a recovery channel, so a different number (or `null`)
-   *   fails with `phone_verified` (status 409) and nothing changes: it is
-   *   changed through `POST /user/:id/verify-phone/start`, which proves the
-   *   new number by SMS. The same number, in any format, is not an error. Changing an unverified phone keeps
-   *   `phone_verified: false`.
+   *   fails with `phone_change_requires_verification` (status 409) and
+   *   nothing changes: to change it, verify the new number by SMS with
+   *   `POST /user/:id/verify-phone/start`. (Not to be confused with
+   *   `phone_already_verified`, from `verify-phone/restart`, which means
+   *   there is nothing to verify.) The same number, in any format, is not an
+   *   error. Changing an unverified phone keeps `phone_verified: false`.
    * - `fields` are stored in `user_metadata["faable.com/fields"]`. Only the
    *   keys the application declares (`profile_fields` on the client, else on
    *   the tenant) are accepted; any other key, or a value that does not match
@@ -2499,8 +2501,8 @@ export class FaableAuthClient extends Base {
    * })
    *
    * const { error: phone_error } = await auth.updateProfile({ phone: '636123456' })
-   * if (phone_error?.code === 'phone_verified') {
-   *   // A verified phone: changing it needs an SMS code.
+   * if (phone_error?.code === 'phone_change_requires_verification') {
+   *   // A verified phone: to change it, verify the new number by SMS.
    * }
    * ```
    * @see {@link https://faable.com/docs/auth/self-service-account | Self-service account}

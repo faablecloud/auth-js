@@ -89,7 +89,7 @@ export type ErrorCode =
   // `updateProfile({ phone })`: the number does not normalise (400), or the
   // current phone is verified and only `verify-phone/start` can change it (409).
   | 'invalid_phone'
-  | 'phone_verified'
+  | 'phone_change_requires_verification'
 
 export class AuthError extends Error {
   /**
